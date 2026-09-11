@@ -44,11 +44,36 @@ export default function Dashboard() {
     setLogs((prev) => [...prev, newLog]);
   };
 
-  const handleStartScan = async () => {
+  const [customSearchTerm, setCustomSearchTerm] = useState('');
+
+  const TRENDING_CHIPS = [
+    'Projetor',
+    'Mouse Sem Fio',
+    'Capa de Chuva Moto',
+    'Lembrancinha Professores',
+    'Panela Mexedeira de Massa Salgado',
+    'Rasteirinha',
+    'PC Gamer',
+    'Playstation 5',
+    'Biquíni',
+    'Kit Calcinha Algodao',
+    'Bebê Reborn',
+    'Pião Fever Profissional',
+  ];
+
+  const handleStartScan = async (specificTerm?: string) => {
     if (isScanning) return;
     setIsScanning(true);
     setIsDrawerOpen(true);
-    addLog('step', `Iniciando varredura na Shopee (Modo: ${headfulMode ? 'Visível' : 'Invisível/Headless'})...`);
+
+    const termToUse = specificTerm || customSearchTerm.trim() || undefined;
+
+    addLog(
+      'step',
+      `Iniciando varredura na Shopee ${
+        termToUse ? `para o termo: "${termToUse}"` : '(automático de Buscas em Alta)'
+      } (Modo: ${headfulMode ? 'Visível' : 'Invisível/Headless'})...`
+    );
 
     try {
       const eventSource = new EventSource('/api/scanner/logs');
@@ -58,7 +83,11 @@ export default function Dashboard() {
           const logData = JSON.parse(event.data);
           addLog(logData.type || 'info', logData.message);
 
-          if (logData.type === 'success' || logData.message.includes('finalizada') || logData.message.includes('concluída')) {
+          if (
+            logData.type === 'success' ||
+            logData.message.includes('finalizada') ||
+            logData.message.includes('concluída')
+          ) {
             fetchProducts();
           }
         } catch {
@@ -74,7 +103,7 @@ export default function Dashboard() {
       const startRes = await fetch('/api/scanner/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headful: headfulMode }),
+        body: JSON.stringify({ headful: headfulMode, term: termToUse }),
       });
 
       const startData = await startRes.json();
@@ -150,6 +179,20 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteProduct = async (id: string) => {
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProducts((prev) => prev.filter((p) => p.id !== id));
+      }
+    } catch (err) {
+      console.error('Failed to delete product', err);
+    }
+  };
+
   const pendingCount = products.filter((p) => p.status === 'pending').length;
   const publishedCount = products.filter((p) => p.status === 'published').length;
 
@@ -201,7 +244,7 @@ export default function Dashboard() {
             {/* Start Scan Button */}
             <button
               type="button"
-              onClick={handleStartScan}
+              onClick={() => handleStartScan()}
               disabled={isScanning}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#EE4D2D] hover:bg-[#D03E1F] text-white text-xs font-bold rounded-xl shadow-md shadow-orange-500/20 transition disabled:opacity-50 active:scale-95"
             >
@@ -213,10 +256,62 @@ export default function Dashboard() {
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-white" />
-                  <span>Iniciar Varredura</span>
+                  <span>Iniciar Varredura Automática</span>
                 </>
               )}
             </button>
+          </div>
+        </section>
+
+        {/* Trending Searches Chips Section */}
+        <section className="bg-white rounded-3xl p-5 border border-gray-200/80 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                🔥 Buscas em Alta na Shopee:
+              </span>
+              <span className="text-xs text-gray-500">
+                (Clique em um termo para minerar diretamente ou digite abaixo)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 max-w-sm w-full">
+              <input
+                type="text"
+                value={customSearchTerm}
+                onChange={(e) => setCustomSearchTerm(e.target.value)}
+                placeholder="Ex: Projetor, Mouse Sem Fio..."
+                disabled={isScanning}
+                className="w-full text-xs bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:bg-white transition"
+              />
+              {customSearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => handleStartScan(customSearchTerm)}
+                  disabled={isScanning}
+                  className="px-3 py-2 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded-xl shrink-0 transition"
+                >
+                  Buscar
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            {TRENDING_CHIPS.map((term) => (
+              <button
+                key={term}
+                type="button"
+                onClick={() => {
+                  setCustomSearchTerm(term);
+                  handleStartScan(term);
+                }}
+                disabled={isScanning}
+                className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full bg-orange-50/70 hover:bg-orange-100/90 text-gray-800 hover:text-[#EE4D2D] border border-orange-200/70 transition font-medium disabled:opacity-50"
+              >
+                <span>{term}</span>
+              </button>
+            ))}
           </div>
         </section>
 
@@ -290,7 +385,7 @@ export default function Dashboard() {
               {statusFilter === 'all' && (
                 <button
                   type="button"
-                  onClick={handleStartScan}
+                  onClick={() => handleStartScan()}
                   disabled={isScanning}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-[#EE4D2D] text-white text-xs font-bold rounded-xl shadow hover:bg-[#D03E1F] transition"
                 >
@@ -306,6 +401,7 @@ export default function Dashboard() {
                   key={product.id}
                   product={product}
                   onStatusChange={handleStatusChange}
+                  onDelete={handleDeleteProduct}
                 />
               ))}
             </div>

@@ -10,20 +10,35 @@ import {
   formatPrice,
   isProductEligible,
 } from './parser';
+import { parseProductCard } from './product-card-parser';
 
 const PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
 
-// Termos em alta de fallback caso o banner da home esteja bloqueado por desafio
-const FALLBACK_TRENDING_TERMS = [
-  'mini processador eletrico',
-  'fone bluetooth sem fio',
-  'luminaria led recarregavel',
-  'organizador multiuso',
-  'relogio smartwatch',
+// Termos em alta reais extraídos da seção "Buscas em alta" da Shopee
+export const REAL_SHOPEE_TRENDING_TERMS = [
+  'Projetor',
+  'Mouse Sem Fio',
+  'Capa de Chuva Moto',
+  'Rasteirinha',
+  'Lembrancinha Professores',
+  'Biquíni',
+  'Kit Calcinha Algodao',
+  'Bebê Reborn',
+  'PC Gamer',
+  'Playstation 5',
+  'Panela Mexedeira de Massa Salgado',
+  'Pião Fever Profissional',
+  'Óculos de Sol Oakley Bluetooth',
+  'Lego',
+  'Sofá',
+  'Vibrador',
+  'Pele de Bumbo',
+  'Bloqueador de Sinal Bluetooth',
 ];
 
 interface ScannerOptions {
   headful?: boolean;
+  term?: string;
 }
 
 export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
@@ -78,57 +93,85 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
     const page: Page = pages.length > 0 ? pages[0] : await context.newPage();
 
     // 3. Obter termos de "Buscas em alta"
-    scannerEvents.emit('step', 'Acessando Shopee para identificar termos de "Buscas em alta"...');
     let trendingTerms: string[] = [];
 
-    try {
-      await page.goto('https://shopee.com.br/top_products', {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
-      });
+    if (options.term && options.term.trim().length > 0) {
+      trendingTerms = [options.term.trim()];
+      scannerEvents.emit('info', `Varredura direcionada para o termo em alta: "${options.term}"`);
+    } else {
+      scannerEvents.emit('step', 'Acessando página inicial da Shopee para verificar a seção "Buscas em alta"...');
 
-      // Aguarda um instante para scripts renderizarem
-      await page.waitForTimeout(2000);
-
-      // Tenta extrair termos de tendências ou categorias em alta
-      const extracted = await page.evaluate(() => {
-        const terms: string[] = [];
-        // Busca palavras-chave em sugestões ou links de buscas populares
-        const elements = document.querySelectorAll(
-          'a[href*="/search?keyword="], .shopee-searchbar-hints__item, [data-sqe="trending-item"], .top-products-item__title'
-        );
-        elements.forEach((el) => {
-          const text = el.textContent?.trim();
-          if (text && text.length > 2 && !terms.includes(text)) {
-            terms.push(text);
-          }
+      try {
+        await page.goto('https://shopee.com.br', {
+          waitUntil: 'domcontentloaded',
+          timeout: 35000,
         });
-        return terms;
-      });
 
-      if (extracted.length > 0) {
-        trendingTerms = extracted.slice(0, 5);
+        // Scroll para carregar a seção de Buscas em alta na home
+        await page.waitForTimeout(2000);
+        await page.mouse.wheel(0, 1000);
+        await page.waitForTimeout(1500);
+
+        const extracted = await page.evaluate(() => {
+          const terms: string[] = [];
+          // Procura por container com "Buscas em alta"
+          const headings = Array.from(document.querySelectorAll('*'));
+          const target = headings.find((el) => {
+            const txt = el.textContent?.trim().toLowerCase();
+            return txt === 'buscas em alta' || txt === 'top searches';
+          });
+
+          if (target) {
+            const parent =
+              target.closest('section') ||
+              target.closest('div[class*="section"]') ||
+              target.parentElement?.parentElement;
+            if (parent) {
+              const links = parent.querySelectorAll('a, [class*="item"]');
+              links.forEach((l) => {
+                const text = l.textContent?.replace(/buscas em alta/gi, '').trim();
+                if (text && text.length > 2 && text.length < 50 && !terms.includes(text)) {
+                  terms.push(text);
+                }
+              });
+            }
+          }
+
+          // Links com busca por keyword
+          document.querySelectorAll('a[href*="keyword="]').forEach((a) => {
+            const text = a.textContent?.trim();
+            if (text && text.length > 2 && text.length < 50 && !terms.includes(text)) {
+              terms.push(text);
+            }
+          });
+
+          return terms;
+        });
+
+        if (extracted.length > 0) {
+          trendingTerms = extracted.slice(0, 5);
+          scannerEvents.emit(
+            'info',
+            `Termos capturados da página inicial da Shopee: ${trendingTerms.map((t) => `"${t}"`).join(', ')}`
+          );
+        }
+      } catch (err: any) {
+        scannerEvents.emit('warn', `Aviso ao carregar home da Shopee: ${err.message}`);
+      }
+
+      // Se não encontrou termos suficientes na página, completa com os termos reais da Shopee
+      if (trendingTerms.length < 5) {
+        for (const fallback of REAL_SHOPEE_TRENDING_TERMS) {
+          if (!trendingTerms.includes(fallback)) {
+            trendingTerms.push(fallback);
+          }
+          if (trendingTerms.length >= 5) break;
+        }
         scannerEvents.emit(
           'info',
-          `Termos em alta capturados da Shopee: ${trendingTerms.map((t) => `"${t}"`).join(', ')}`
+          `Termos selecionados da lista de Buscas em Alta: ${trendingTerms.map((t) => `"${t}"`).join(', ')}`
         );
       }
-    } catch (err: any) {
-      scannerEvents.emit('warn', `Não foi possível carregar página de tendências: ${err.message}`);
-    }
-
-    // Se não encontrou termos suficientes na página, completa com os termos de alta busca
-    if (trendingTerms.length < 5) {
-      for (const fallback of FALLBACK_TRENDING_TERMS) {
-        if (!trendingTerms.includes(fallback)) {
-          trendingTerms.push(fallback);
-        }
-        if (trendingTerms.length >= 5) break;
-      }
-      scannerEvents.emit(
-        'info',
-        `Termos selecionados para análise: ${trendingTerms.map((t) => `"${t}"`).join(', ')}`
-      );
     }
 
     // 4. Analisar termo a termo ordenado por "Mais recente"
@@ -220,40 +263,46 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
           `[Termo "${term}"] ${rawProducts.length} produtos carregados para inspeção.`
         );
 
-        // Processa cada produto verificado
+        // Processa cada produto verificado com o seam testado parseProductCard
         for (let j = 0; j < rawProducts.length; j++) {
           const raw = rawProducts[j];
-          const productId = extractShopeeProductId(raw.href);
-          const salesCount = parseSalesCount(raw.salesText);
-          const productUrl = normalizeShopeeUrl(raw.href);
-          const price = formatPrice(raw.price);
+          const candidate = parseProductCard(
+            {
+              rawHref: raw.href,
+              rawTitle: raw.title,
+              rawPrice: raw.price,
+              rawSalesText: raw.salesText,
+              rawImageUrl: raw.imageUrl,
+            },
+            existingIds
+          );
 
-          // Verifica elegibilidade: >= 5 vendas e ainda não cadastrado
-          if (isProductEligible(salesCount, productId, existingIds)) {
+          // Se for elegível (>= 5 vendas e ainda não cadastrado)
+          if (candidate && candidate.isEligible) {
             scannerEvents.emit(
               'success',
-              `🎯 Produto elegível encontrado! "${raw.title}" (${salesCount} vendas, ${price})`
+              `🎯 Produto elegível encontrado! "${candidate.title}" (${candidate.salesCount} vendas, ${candidate.price})`
             );
 
             // Salva no banco de dados SQLite
             const savedProduct = await prisma.product.upsert({
-              where: { id: productId },
+              where: { id: candidate.id },
               update: {
-                title: raw.title,
-                price,
-                salesCount,
-                imageUrl: raw.imageUrl,
-                productUrl,
+                title: candidate.title,
+                price: candidate.price,
+                salesCount: candidate.salesCount,
+                imageUrl: candidate.imageUrl,
+                productUrl: candidate.productUrl,
                 searchTerm: term,
                 status: 'pending',
               },
               create: {
-                id: productId,
-                title: raw.title,
-                price,
-                salesCount,
-                imageUrl: raw.imageUrl,
-                productUrl,
+                id: candidate.id,
+                title: candidate.title,
+                price: candidate.price,
+                salesCount: candidate.salesCount,
+                imageUrl: candidate.imageUrl,
+                productUrl: candidate.productUrl,
                 searchTerm: term,
                 status: 'pending',
               },

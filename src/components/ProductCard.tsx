@@ -140,21 +140,21 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         </div>
 
         {/* Buttons */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
           <button
             type="button"
             onClick={handleCopyLink}
-            className="inline-flex items-center justify-center gap-1.5 text-xs font-medium py-2 px-3 bg-white hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-xl transition shadow-sm"
+            className="inline-flex items-center justify-center gap-1.5 text-xs font-medium py-2 px-2.5 bg-white hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-xl transition shadow-sm"
           >
             {copied ? (
               <>
                 <Check className="w-3.5 h-3.5 text-green-600" />
-                <span className="text-green-600 font-semibold">Copiado!</span>
+                <span className="text-green-600 font-semibold">Copiado</span>
               </>
             ) : (
               <>
                 <Copy className="w-3.5 h-3.5 text-gray-500" />
-                <span>Copiar Link</span>
+                <span>Copiar</span>
               </>
             )}
           </button>
@@ -163,11 +163,22 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             href={product.productUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-1.5 text-xs font-medium py-2 px-3 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[#EE4D2D] rounded-xl transition shadow-sm font-semibold"
+            className="inline-flex items-center justify-center gap-1 text-xs font-medium py-2 px-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[#EE4D2D] rounded-xl transition shadow-sm font-semibold"
           >
-            <span>Ver Shopee</span>
-            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Shopee</span>
+            <ExternalLink className="w-3 h-3" />
           </a>
+
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(product.id)}
+              className="p-2 bg-white hover:bg-red-50 border border-gray-200 hover:border-red-200 text-gray-400 hover:text-red-500 rounded-xl transition shadow-sm"
+              title="Excluir produto"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -14,10 +14,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { headful } = body;
+    const { headful, term } = body;
 
     // Dispara a varredura assincronamente em background para responder imediatamente
-    runShopeeScanner({ headful: Boolean(headful) }).catch((err) => {
+    runShopeeScanner({
+      headful: Boolean(headful),
+      term: typeof term === 'string' ? term : undefined,
+    }).catch((err) => {
       console.error('Unhandled scanner run error:', err);
     });
 
