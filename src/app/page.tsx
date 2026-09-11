@@ -1,0 +1,326 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Play, LogIn, Eye, Sparkles, RefreshCw, Filter } from 'lucide-react';
+import { Navbar } from '@/components/Navbar';
+import { ProductCard } from '@/components/ProductCard';
+import { TerminalDrawer } from '@/components/TerminalDrawer';
+import { Product, ProductStatus, ScanLogEvent } from '@/types/product';
+
+export default function Dashboard() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [headfulMode, setHeadfulMode] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isLaunchingSession, setIsLaunchingSession] = useState(false);
+  const [logs, setLogs] = useState<ScanLogEvent[]>([]);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch(`/api/products?status=${statusFilter}`);
+      const data = await res.json();
+      if (data.success) {
+        setProducts(data.products);
+      }
+    } catch (err) {
+      console.error('Failed to fetch products', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, [statusFilter]);
+
+  const addLog = (type: ScanLogEvent['type'], message: string) => {
+    const newLog: ScanLogEvent = {
+      type,
+      message,
+      timestamp: new Date().toLocaleTimeString(),
+    };
+    setLogs((prev) => [...prev, newLog]);
+  };
+
+  const handleStartScan = async () => {
+    if (isScanning) return;
+    setIsScanning(true);
+    setIsDrawerOpen(true);
+    addLog('step', `Iniciando varredura na Shopee (Modo: ${headfulMode ? 'Visível' : 'Invisível/Headless'})...`);
+
+    try {
+      const eventSource = new EventSource('/api/scanner/logs');
+
+      eventSource.onmessage = (event) => {
+        try {
+          const logData = JSON.parse(event.data);
+          addLog(logData.type || 'info', logData.message);
+
+          if (logData.type === 'success' || logData.message.includes('finalizada') || logData.message.includes('concluída')) {
+            fetchProducts();
+          }
+        } catch {
+          addLog('info', event.data);
+        }
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+      };
+
+      // Trigger start
+      const startRes = await fetch('/api/scanner/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headful: headfulMode }),
+      });
+
+      const startData = await startRes.json();
+
+      if (!startData.success) {
+        addLog('error', `Erro ao disparar varredura: ${startData.error}`);
+        setIsScanning(false);
+        eventSource.close();
+        return;
+      }
+
+      // Wait until scan completes via polling status or SSE stream close
+      const checkInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch('/api/scanner/status');
+          const statusData = await statusRes.json();
+          if (!statusData.isScanning) {
+            clearInterval(checkInterval);
+            setIsScanning(false);
+            eventSource.close();
+            fetchProducts();
+            addLog('success', 'Varredura finalizada. Lista de produtos atualizada.');
+          }
+        } catch {
+          clearInterval(checkInterval);
+          setIsScanning(false);
+          eventSource.close();
+        }
+      }, 2000);
+
+    } catch (err: any) {
+      addLog('error', `Falha de conexão: ${err.message}`);
+      setIsScanning(false);
+    }
+  };
+
+  const handleLaunchSession = async () => {
+    if (isLaunchingSession) return;
+    setIsLaunchingSession(true);
+    setIsDrawerOpen(true);
+    addLog('step', 'Abrindo navegador persistente para autenticação na Shopee...');
+
+    try {
+      const res = await fetch('/api/scanner/session', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        addLog('success', 'Navegador aberto! Realize o login ou verificações se necessário.');
+      } else {
+        addLog('error', `Falha ao abrir navegador: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao comunicar com o servidor: ${err.message}`);
+    } finally {
+      setIsLaunchingSession(false);
+    }
+  };
+
+  const handleStatusChange = async (id: string, newStatus: ProductStatus) => {
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProducts((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p))
+        );
+      }
+    } catch (err) {
+      console.error('Failed to update status', err);
+    }
+  };
+
+  const pendingCount = products.filter((p) => p.status === 'pending').length;
+  const publishedCount = products.filter((p) => p.status === 'published').length;
+
+  return (
+    <div className="min-h-screen pb-24">
+      <Navbar
+        totalCount={products.length}
+        pendingCount={pendingCount}
+        publishedCount={publishedCount}
+      />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Actions & Controls Bar */}
+        <section className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6">
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-[#EE4D2D]" />
+              Painel de Mineração de Vídeos
+            </h2>
+            <p className="text-xs sm:text-sm text-gray-500">
+              Monitore produtos recentes de buscas em alta com mais de 5 vendas para a Shopee Vídeo.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Toggle Headful Mode */}
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-3 py-2.5 rounded-xl cursor-pointer transition select-none">
+              <input
+                type="checkbox"
+                checked={headfulMode}
+                onChange={(e) => setHeadfulMode(e.target.checked)}
+                className="w-4 h-4 rounded text-[#EE4D2D] focus:ring-orange-400"
+              />
+              <Eye className="w-3.5 h-3.5 text-gray-500" />
+              <span>Modo Visível</span>
+            </label>
+
+            {/* Login Browser Button */}
+            <button
+              type="button"
+              onClick={handleLaunchSession}
+              disabled={isLaunchingSession || isScanning}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition shadow-sm disabled:opacity-50"
+            >
+              <LogIn className="w-4 h-4 text-gray-500" />
+              <span>{isLaunchingSession ? 'Abrindo...' : 'Login Shopee'}</span>
+            </button>
+
+            {/* Start Scan Button */}
+            <button
+              type="button"
+              onClick={handleStartScan}
+              disabled={isScanning}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#EE4D2D] hover:bg-[#D03E1F] text-white text-xs font-bold rounded-xl shadow-md shadow-orange-500/20 transition disabled:opacity-50 active:scale-95"
+            >
+              {isScanning ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Varrendo Shopee...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>Iniciar Varredura</span>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
+        {/* Filter Tabs & Counter */}
+        <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-4">
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0">
+            <span className="text-xs font-semibold text-gray-400 mr-1 flex items-center gap-1">
+              <Filter className="w-3 h-3" /> Filtrar:
+            </span>
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'pending', label: 'Pendentes' },
+              { id: 'published', label: 'Vídeo Publicado' },
+              { id: 'discarded', label: 'Descartados' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={`text-xs font-medium px-3.5 py-1.5 rounded-lg transition ${
+                  statusFilter === tab.id
+                    ? 'bg-gray-900 text-white shadow-sm'
+                    : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchProducts}
+            className="text-xs text-gray-500 hover:text-gray-900 flex items-center gap-1.5 self-end sm:self-auto font-medium"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Atualizar lista</span>
+          </button>
+        </section>
+
+        {/* Product Grid */}
+        <section>
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((n) => (
+                <div
+                  key={n}
+                  className="bg-white rounded-2xl border border-gray-200 h-80 animate-pulse p-4 space-y-3"
+                >
+                  <div className="w-full aspect-square bg-gray-100 rounded-xl" />
+                  <div className="h-4 bg-gray-100 rounded w-3/4" />
+                  <div className="h-4 bg-gray-100 rounded w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : products.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-dashed border-gray-300 p-12 text-center max-w-lg mx-auto space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-orange-50 text-[#EE4D2D] flex items-center justify-center mx-auto">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-gray-900">
+                  Nenhuma oportunidade encontrada
+                </h3>
+                <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                  {statusFilter === 'all'
+                    ? 'Clique no botão "Iniciar Varredura" acima para minerar o primeiro produto em alta na Shopee.'
+                    : `Não há produtos no status "${statusFilter}".`}
+                </p>
+              </div>
+              {statusFilter === 'all' && (
+                <button
+                  type="button"
+                  onClick={handleStartScan}
+                  disabled={isScanning}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#EE4D2D] text-white text-xs font-bold rounded-xl shadow hover:bg-[#D03E1F] transition"
+                >
+                  <Play className="w-3.5 h-3.5 fill-white" />
+                  <span>Começar agora</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {products.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  onStatusChange={handleStatusChange}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
+
+      {/* Terminal Drawer for SSE Logs */}
+      <TerminalDrawer
+        logs={logs}
+        isOpen={isDrawerOpen}
+        onToggle={() => setIsDrawerOpen(!isDrawerOpen)}
+        onClear={() => setLogs([])}
+        isScanning={isScanning}
+      />
+    </div>
+  );
+}
