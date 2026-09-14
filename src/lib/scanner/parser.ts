@@ -38,9 +38,38 @@ export function parseSalesCount(salesText: string | null | undefined): number {
 }
 
 /**
+ * Verifica se a URL aponta para uma página de produto da Shopee, aceitando os
+ * três formatos de link em circulação:
+ * - Legado: ...-i.<shopId>.<itemId>
+ * - Canônico atual: /product/<shopId>/<itemId>
+ * - Query params: ?...shopid=<shopId>&itemid=<itemId>
+ */
+export function isShopeeProductUrl(url: string): boolean {
+  if (!url) return false;
+
+  const cleanUrl = url.split('?')[0];
+  if (/-i\.\d+\.\d+/.test(cleanUrl)) return true;
+  if (/\/product\/\d+\/\d+/.test(cleanUrl)) return true;
+
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://shopee.com.br${url}`);
+    const shopid = parsed.searchParams.get('shopid');
+    const itemid = parsed.searchParams.get('itemid');
+    if (shopid && itemid && /^\d+$/.test(shopid) && /^\d+$/.test(itemid)) {
+      return true;
+    }
+  } catch {
+    // não é URL parseável, então não é produto
+  }
+
+  return false;
+}
+
+/**
  * Extrai o ID único do produto a partir da URL da Shopee.
- * Formato padrão: ...-i.<shopId>.<itemId>
- * Se não contiver esse formato, gera um identificador canônico da URL limpa.
+ * Formatos aceitos: ...-i.<shopId>.<itemId>, /product/<shopId>/<itemId>
+ * e ?...shopid=<shopId>&itemid=<itemId>.
+ * Se nenhum for encontrado, gera um identificador canônico da URL limpa.
  */
 export function extractShopeeProductId(url: string): string {
   try {
@@ -56,6 +85,14 @@ export function extractShopeeProductId(url: string): string {
       return `${directMatch[1]}.${directMatch[2]}`;
     }
 
+    // Links com shopid/itemid em query string
+    const parsed = new URL(url.startsWith('http') ? url : `https://shopee.com.br${url}`);
+    const shopid = parsed.searchParams.get('shopid');
+    const itemid = parsed.searchParams.get('itemid');
+    if (shopid && itemid && /^\d+$/.test(shopid) && /^\d+$/.test(itemid)) {
+      return `${shopid}.${itemid}`;
+    }
+
     // Fallback: hash ou pathname limpo
     return cleanUrl.replace(/^https?:\/\/[^/]+/, '');
   } catch {
@@ -64,11 +101,20 @@ export function extractShopeeProductId(url: string): string {
 }
 
 /**
- * Normaliza a URL do produto removendo parâmetros de rastreamento e sessão
+ * Normaliza a URL do produto removendo parâmetros de rastreamento e sessão.
+ * Links com shopid/itemid em query string são convertidos para a forma
+ * canônica /product/<shopId>/<itemId> para não perder os identificadores.
  */
 export function normalizeShopeeUrl(url: string): string {
   try {
     const parsed = new URL(url.startsWith('http') ? url : `https://shopee.com.br${url}`);
+
+    const shopid = parsed.searchParams.get('shopid');
+    const itemid = parsed.searchParams.get('itemid');
+    if (shopid && itemid && /^\d+$/.test(shopid) && /^\d+$/.test(itemid)) {
+      return `https://shopee.com.br/product/${shopid}/${itemid}`;
+    }
+
     return `${parsed.origin}${parsed.pathname}`;
   } catch {
     return url.split('?')[0];

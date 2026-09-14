@@ -16,6 +16,10 @@ model Product {
   productUrl  String
   searchTerm  String
   status      String   @default("pending") // pending | published | discarded
+  tikTokUrl   String?
+  videoUrl    String?
+  videoPath   String?
+  videoStatus String   @default("none") // none | searched | downloaded | failed
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

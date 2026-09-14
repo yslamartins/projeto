@@ -11,8 +11,75 @@ import {
   isProductEligible,
 } from './parser';
 import { parseProductCard } from './product-card-parser';
+import { fetchSearchItems, mapApiItemToRawCard } from './api-search';
+import { closeActiveContext, getActiveContext, setActiveContext } from './browser-context';
 
 const PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
+
+const MAX_TERMS_PER_SCAN = 20;
+const MAX_PRODUCTS_PER_TERM = 30;
+const MAX_ELIGIBLE_PER_TERM = 10;
+
+const SECURITY_GATE_MESSAGE =
+  'Shopee exibiu verificação de segurança (anti-bot) e bloqueou esta varredura. Resolva o desafio/slider uma única vez no navegador visível clicando em "Login Shopee", e rode a varredura novamente (de preferência com "Modo Visível" ativado).';
+
+const LOGIN_WALL_MESSAGE =
+  'Shopee exigiu o login para pesquisar este termo (alguns termos, como produtos para adultos, só aparecem para contas autenticadas). Clique em "Login Shopee", faça login/resolva a verificação uma vez, e rode a varredura novamente.';
+
+const TEMPORARY_BLOCK_MESSAGE =
+  'Shopee bloqueou temporariamente a varredura ("A verificação falhou / Tente novamente mais tarde"). Aguarde alguns minutos antes de tentar de novo; tentativas em sequência rápida reforçam o bloqueio.';
+
+async function isSecurityGate(page: Page): Promise<boolean> {
+  if (page.url().includes('/verify/')) return true;
+  try {
+    const text = (await page.locator('body').innerText({ timeout: 4000 })) || '';
+    return /verifique para continuar|quebra-cabeça|captcha|verificação de segurança/i.test(
+      text.slice(0, 2000)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function isLoginWall(page: Page): Promise<boolean> {
+  if (/\/buyer\/login(\/|$)/.test(page.url())) return true;
+  try {
+    const text = (await page.locator('body').innerText({ timeout: 4000 })) || '';
+    return /faça login com senha|fazer login|mantenha-se conectado|stay signed in/i.test(
+      text.slice(0, 3000)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function isTemporaryRateLimit(page: Page): Promise<boolean> {
+  if (page.url().includes('/verify/')) return false;
+  try {
+    const text = (await page.locator('body').innerText({ timeout: 4000 })) || '';
+    return /tente novamente mais tarde|a verifica[çc][ãa]o falhou|tente novamente em alguns minutos/i.test(
+      text.slice(0, 2000)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function maybeBlockMessage(page: Page): Promise<string | null> {
+  if (await isTemporaryRateLimit(page)) return TEMPORARY_BLOCK_MESSAGE;
+  if (await isSecurityGate(page)) return SECURITY_GATE_MESSAGE;
+  if (await isLoginWall(page)) return LOGIN_WALL_MESSAGE;
+  return null;
+}
+
+async function waitForSearchResults(page: Page, timeout = 12000): Promise<boolean> {
+  try {
+    await page.waitForSelector('.shopee-search-item-result__item', { timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Termos em alta reais extraídos da seção "Buscas em alta" da Shopee
 export const REAL_SHOPEE_TRENDING_TERMS = [
@@ -77,17 +144,25 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       `Abrindo Chromium (${isHeadless ? 'Headless/Invisível' : 'Modo Visível'})...`
     );
 
+    // Libera o perfil persistente caso haja um navegador de sessão/login aberto
+    if (getActiveContext()) {
+      scannerEvents.emit(
+        'info',
+        'Fechando navegador de sessão aberto para liberar o perfil persistente...'
+      );
+      await closeActiveContext();
+    }
+
     context = await chromium.launchPersistentContext(PROFILE_DIR, {
       headless: isHeadless,
+      channel: 'chrome',
       viewport: { width: 1366, height: 768 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       args: [
-        '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
       ],
     });
+    setActiveContext(context);
 
     const pages = context.pages();
     const page: Page = pages.length > 0 ? pages[0] : await context.newPage();
@@ -149,7 +224,7 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
         });
 
         if (extracted.length > 0) {
-          trendingTerms = extracted.slice(0, 5);
+          trendingTerms = extracted.slice(0, MAX_TERMS_PER_SCAN);
           scannerEvents.emit(
             'info',
             `Termos capturados da página inicial da Shopee: ${trendingTerms.map((t) => `"${t}"`).join(', ')}`
@@ -160,12 +235,12 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       }
 
       // Se não encontrou termos suficientes na página, completa com os termos reais da Shopee
-      if (trendingTerms.length < 5) {
+      if (trendingTerms.length < MAX_TERMS_PER_SCAN) {
         for (const fallback of REAL_SHOPEE_TRENDING_TERMS) {
           if (!trendingTerms.includes(fallback)) {
             trendingTerms.push(fallback);
           }
-          if (trendingTerms.length >= 5) break;
+          if (trendingTerms.length >= MAX_TERMS_PER_SCAN) break;
         }
         scannerEvents.emit(
           'info',
@@ -174,12 +249,26 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       }
     }
 
-    // 4. Analisar termo a termo ordenado por "Mais recente"
+    // 4. Analisar termo a termo ordenado por "Mais recente", salvando até 10 por termo
+    const collectedProducts: any[] = [];
+
     for (let i = 0; i < trendingTerms.length; i++) {
       const term = trendingTerms[i];
+      let savedInTerm = 0;
+
+      // Pausa humanizada entre termos para reduzir risco de bloqueio anti-bot
+      if (i > 0) {
+        const pauseMs = 2000 + Math.floor(Math.random() * 4000);
+        scannerEvents.emit(
+          'info',
+          `Aguardando ${Math.round(pauseMs / 1000)}s antes do próximo termo...`
+        );
+        await page.waitForTimeout(pauseMs);
+      }
+
       scannerEvents.emit(
         'step',
-        `[Termo ${i + 1}/5] Pesquisando "${term}" ordenado por "Mais recente"...`
+        `[Termo ${i + 1}/${trendingTerms.length}] Pesquisando "${term}" ordenado por "Mais recente"...`
       );
 
       // URL de busca com ordenação por mais recente (sortBy=ctime na Shopee)
@@ -192,6 +281,32 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
           waitUntil: 'domcontentloaded',
           timeout: 30000,
         });
+
+        // Bloqueio (gate anti-bot ou login-wall): aborta com mensagem acionável em vez de reportar "0 produtos"
+        const blockMessage = await maybeBlockMessage(page);
+        if (blockMessage) {
+          scannerEvents.emit('error', blockMessage);
+          return { success: false, error: blockMessage };
+        }
+
+        // Aguarda a grade renderizar; recarrega uma vez se demorar
+        let resultsReady = await waitForSearchResults(page);
+        if (!resultsReady) {
+          scannerEvents.emit(
+            'info',
+            `[Termo "${term}"] Cards não apareceram; recarregando a página de busca...`
+          );
+          await page.goto(searchUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000,
+          });
+          const blockMessage = await maybeBlockMessage(page);
+          if (blockMessage) {
+            scannerEvents.emit('error', blockMessage);
+            return { success: false, error: blockMessage };
+          }
+          resultsReady = await waitForSearchResults(page);
+        }
 
         // Simula scroll suave para carregar as imagens e badges de até 30 produtos
         await page.waitForTimeout(1500);
@@ -210,28 +325,56 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
             imageUrl: string;
           }> = [];
 
-          // Seletores comuns da grade de produtos da Shopee
+          // Seletores comuns da grade de produtos da Shopee (formatos -i. e /product/)
           const cardElements = document.querySelectorAll(
-            'a[data-sqe="link"], a[href*="-i."], .shopee-search-item-result__item a'
+            'a[data-sqe="link"], a[href*="-i."], a[href*="/product/"], a[href*="shopid="], .shopee-search-item-result__item a'
           );
 
           cardElements.forEach((card) => {
             if (items.length >= 30) return;
 
             const href = (card as HTMLAnchorElement).href;
-            if (!href || !href.includes('-i.')) return;
+            if (!href) return;
 
-            // Busca título
+            // Aceita os três formatos: -i.<shopId>.<itemId>, /product/<shopId>/<itemId>
+            // e ...?shopid=<shopId>&itemid=<itemId>
+            const pathname = href.split('?')[0];
+            const hasShopidItemidQuery =
+              /[?&]shopid=\d+/.test(href) && /[?&]itemid=\d+/.test(href);
+            const isProductLink =
+              /-i\.\d+\.\d+/.test(pathname) ||
+              /\/product\/\d+\/\d+/.test(pathname) ||
+              hasShopidItemidQuery;
+            if (!isProductLink) return;
+
+            // Busca título (seletor atual da Shopee não usa mais data-sqe="name")
             const titleEl = card.querySelector(
-              '[data-sqe="name"], .line-clamp-2, .whitespace-normal'
+              '[data-sqe="name"], .line-clamp-2, .whitespace-normal, [class*="name"]'
             );
-            const title = titleEl?.textContent?.trim() || '';
+            let title = titleEl?.textContent?.trim() || '';
+            if (!title) {
+              const aria = card
+                .closest('[aria-label^="Product card"]')
+                ?.getAttribute('aria-label')
+                ?.replace(/^Product card:\s*/i, '')
+                .trim();
+              title = aria || '';
+            }
+            if (!title) {
+              title = card.querySelector('img')?.getAttribute('alt')?.trim() || '';
+            }
 
             // Busca preço
             const priceEl = card.querySelector(
-              '.text-shopee-primary, [aria-label*="reais"], span:has-text("R$")'
+              '.text-shopee-primary, [aria-label*="reais"], [class*="price"]'
             );
-            const price = priceEl?.textContent?.trim() || '';
+            let price = priceEl?.textContent?.trim() || '';
+            if (!price) {
+              const leaf = Array.from(card.querySelectorAll('span, div')).find(
+                (el) => el.children.length === 0 && /\bR\$\s?[\d.,]+/.test(el.textContent || '')
+              );
+              price = leaf?.textContent?.trim() || '';
+            }
 
             // Busca texto de vendas (ex: "5 vendidos", "12 vendidos", "1,2mil vendidos")
             // Na Shopee, geralmente fica próximo ao final do card
@@ -257,6 +400,39 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
 
           return items;
         });
+
+        // Fallback (DOM primeiro, API JSON interna somente se o DOM não retornou nada)
+        if (rawProducts.length === 0) {
+          scannerEvents.emit(
+            'info',
+            `[Termo "${term}"] DOM não retornou cards; tentando o endpoint interno de busca da Shopee...`
+          );
+
+          const api = await fetchSearchItems(page, term, 30);
+          if (api.gated) {
+            const blockMessage = (await maybeBlockMessage(page)) || SECURITY_GATE_MESSAGE;
+            scannerEvents.emit('error', blockMessage);
+            return { success: false, error: blockMessage };
+          }
+
+          for (const item of api.items) {
+            if (rawProducts.length >= 30) break;
+            const mapped = mapApiItemToRawCard(item);
+            if (!mapped) continue;
+            rawProducts.push({
+              href: mapped.rawHref,
+              title: mapped.rawTitle,
+              price: mapped.rawPrice,
+              salesText: mapped.rawSalesText,
+              imageUrl: mapped.rawImageUrl || '',
+            });
+          }
+
+          scannerEvents.emit(
+            'info',
+            `[Termo "${term}"] ${rawProducts.length} produtos obtidos via API interna.`
+          );
+        }
 
         scannerEvents.emit(
           'info',
@@ -308,20 +484,35 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
               },
             });
 
+            // Evita duplicata entre termos da mesma varredura
+            existingIds.add(candidate.id);
+            collectedProducts.push(savedProduct);
+            savedInTerm++;
+
+            const eligibleSent = savedInTerm >= MAX_ELIGIBLE_PER_TERM ? ' (meta deste termo atingida)' : '';
             scannerEvents.emit(
               'success',
-              `Oportunidade salva no banco com sucesso! Status: Pendente.`
+              `Oportunidade salva no banco! (${savedInTerm}/${MAX_ELIGIBLE_PER_TERM} neste termo)${eligibleSent}`
             );
+          }
 
-            // Encerrar varredura imediatamente com sucesso
-            return { success: true, product: savedProduct };
+          // Atingiu o limite de 10 elegíveis deste termo: interrompe este termo
+          if (savedInTerm >= MAX_ELIGIBLE_PER_TERM) {
+            break;
           }
         }
 
-        scannerEvents.emit(
-          'warn',
-          `Nenhum produto novo com >= 5 vendas nos primeiros ${rawProducts.length} produtos de "${term}".`
-        );
+        if (savedInTerm > 0) {
+          scannerEvents.emit(
+            'info',
+            `Termo "${term}" concluído: ${savedInTerm} produto(s) salvo(s).`
+          );
+        } else {
+          scannerEvents.emit(
+            'warn',
+            `Nenhum produto novo com >= 5 vendas nos primeiros ${rawProducts.length} produtos de "${term}".`
+          );
+        }
       } catch (termErr: any) {
         scannerEvents.emit(
           'error',
@@ -330,9 +521,17 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       }
     }
 
+    if (collectedProducts.length > 0) {
+      scannerEvents.emit(
+        'success',
+        `Varredura concluída: ${collectedProducts.length} produto(s) coletados em ${trendingTerms.length} termo(s) pesquisados (máx ${MAX_ELIGIBLE_PER_TERM} por termo).`
+      );
+      return { success: true, product: collectedProducts };
+    }
+
     scannerEvents.emit(
       'warn',
-      'Varredura finalizada. Nenhum produto novo com >= 5 vendas foi encontrado nos 5 termos pesquisados.'
+      `Varredura finalizada. Nenhum produto novo com >= 5 vendas foi encontrado nos ${trendingTerms.length} termos pesquisados.`
     );
     return { success: true, product: null };
   } catch (error: any) {
@@ -340,11 +539,7 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
     scannerEvents.emit('error', `Erro na varredura: ${error.message}`);
     return { success: false, error: error.message };
   } finally {
-    if (context) {
-      try {
-        await context.close();
-      } catch {}
-    }
+    await closeActiveContext();
     scannerEvents.setIsScanning(false);
   }
 }

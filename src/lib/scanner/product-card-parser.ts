@@ -4,6 +4,7 @@ import {
   formatPrice,
   parseSalesCount,
   isProductEligible,
+  isShopeeProductUrl,
 } from './parser';
 
 export interface RawCardData {
@@ -30,7 +31,7 @@ export function parseProductCard(
 ): ScrapedProductCandidate | null {
   const { rawHref, rawTitle, rawPrice, rawSalesText, rawImageUrl } = cardData;
 
-  if (!rawHref || !rawTitle || !rawHref.includes('-i.')) {
+  if (!rawHref || !rawTitle || !isShopeeProductUrl(rawHref)) {
     return null;
   }
 

@@ -8,18 +8,44 @@ export async function PATCH(
   try {
     const { id } = params;
     const body = await request.json();
-    const { status } = body;
+    const { status, tikTokUrl, videoUrl, videoPath, videoStatus } = body;
 
-    if (!status || !['pending', 'published', 'discarded'].includes(status)) {
+    const data: Record<string, unknown> = {};
+
+    if (status !== undefined) {
+      if (!['pending', 'published', 'discarded'].includes(status)) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid status value' },
+          { status: 400 }
+        );
+      }
+      data.status = status;
+    }
+
+    if (videoStatus !== undefined) {
+      if (!['none', 'searched', 'downloaded', 'failed'].includes(videoStatus)) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid videoStatus value' },
+          { status: 400 }
+        );
+      }
+      data.videoStatus = videoStatus;
+    }
+
+    if (tikTokUrl !== undefined) data.tikTokUrl = tikTokUrl || null;
+    if (videoUrl !== undefined) data.videoUrl = videoUrl || null;
+    if (videoPath !== undefined) data.videoPath = videoPath || null;
+
+    if (Object.keys(data).length === 0) {
       return NextResponse.json(
-        { success: false, error: 'Invalid status value' },
+        { success: false, error: 'No updates provided' },
         { status: 400 }
       );
     }
 
     const updated = await prisma.product.update({
       where: { id },
-      data: { status },
+      data,
     });
 
     return NextResponse.json({ success: true, product: updated });

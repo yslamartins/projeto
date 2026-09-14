@@ -81,4 +81,56 @@ describe('parseProductCard (TDD Seam)', () => {
     expect(result?.id).toBe('999000.111222');
     expect(result?.isEligible).toBe(true);
   });
+
+  it('should parse /product/<shopId>/<itemId> cards and mark as eligible when sales >= 5', () => {
+    const rawCard = {
+      rawHref: 'https://shopee.com.br/product/300581799/22684694938?sp_atk=abc123',
+      rawTitle: 'Caixa De Som Bluetooth Portatil',
+      rawPrice: 'R$ 199,90',
+      rawSalesText: '120 vendidos',
+      rawImageUrl: 'https://down-br.img.susercontent.com/file/br-222.jpg',
+    };
+
+    const result = parseProductCard(rawCard, new Set());
+
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe('300581799.22684694938');
+    expect(result?.productUrl).toBe('https://shopee.com.br/product/300581799/22684694938');
+    expect(result?.title).toBe('Caixa De Som Bluetooth Portatil');
+    expect(result?.price).toBe('R$ 199,90');
+    expect(result?.salesCount).toBe(120);
+    expect(result?.isEligible).toBe(true);
+  });
+
+  it('should mark /product/ card as not eligible when already in database (dedup)', () => {
+    const rawCard = {
+      rawHref: 'https://shopee.com.br/product/300581799/22684694938',
+      rawTitle: 'Caixa De Som Bluetooth Portatil',
+      rawPrice: 'R$ 199,90',
+      rawSalesText: '120 vendidos',
+    };
+
+    const existingIds = new Set<string>(['300581799.22684694938']);
+    const result = parseProductCard(rawCard, existingIds);
+
+    expect(result).not.toBeNull();
+    expect(result?.salesCount).toBe(120);
+    expect(result?.isEligible).toBe(false);
+  });
+
+  it('should parse shopid/itemid query param cards as eligible when sales >= 5', () => {
+    const rawCard = {
+      rawHref: 'https://shopee.com.br/item?sp_atk=abc&shopid=401525579&itemid=22322311690',
+      rawTitle: 'Sandalia Feminina Couro Legitimo',
+      rawPrice: 'R$ 89,90',
+      rawSalesText: '32 vendidos',
+    };
+
+    const result = parseProductCard(rawCard, new Set());
+
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe('401525579.22322311690');
+    expect(result?.productUrl).toBe('https://shopee.com.br/product/401525579/22322311690');
+    expect(result?.isEligible).toBe(true);
+  });
 });

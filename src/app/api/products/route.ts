@@ -28,7 +28,20 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, title, price, salesCount, imageUrl, productUrl, searchTerm, status } = body;
+    const {
+      id,
+      title,
+      price,
+      salesCount,
+      imageUrl,
+      productUrl,
+      searchTerm,
+      status,
+      tikTokUrl,
+      videoUrl,
+      videoPath,
+      videoStatus,
+    } = body;
 
     if (!id || !title || !productUrl) {
       return NextResponse.json(
@@ -47,6 +60,10 @@ export async function POST(request: NextRequest) {
         productUrl,
         searchTerm: searchTerm || '',
         status: status || 'pending',
+        tikTokUrl: tikTokUrl || null,
+        videoUrl: videoUrl || null,
+        videoPath: videoPath || null,
+        videoStatus: videoStatus || 'none',
       },
       create: {
         id,
@@ -57,6 +74,10 @@ export async function POST(request: NextRequest) {
         productUrl,
         searchTerm: searchTerm || '',
         status: status || 'pending',
+        tikTokUrl: tikTokUrl || null,
+        videoUrl: videoUrl || null,
+        videoPath: videoPath || null,
+        videoStatus: videoStatus || 'none',
       },
     });
 

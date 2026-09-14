@@ -1,0 +1,21 @@
+{
+  "currentUrl": "https://shopee.com.br/buyer/login/otp?fu_tracking_id=799b7ef10a2-3196-4bd2-b3f5-c1895cea39f8&next=https%3A%2F%2Fshopee.com.br%2Fsearch%3Fkeyword%3DBoneca%2520Er%25C3%25B3tica%2520Silicone%26sortBy%3Dctime",
+  "title": "Shopee Brasil | Ofertas incríveis. Melhores preços do mercado",
+  "isBlocked": true,
+  "hasLoginWall": true,
+  "noResults": false,
+  "bodySnippet": "Ir para o conteúdo principal Entrar Precisa de ajuda? Entrar PRÓXIMO Stay Signed In Faça login com senha OU Facebook Google By logging in, you agree to Shopee's Termos de serviço & Política de privacidade Novo na Shopee? Cadastrar ATENDIMENTO AO CLIENTE Central de Ajuda Como Comprar Métodos de Pagam",
+  "totalAnchorLinks": 43,
+  "legacyISuffixCount": 0,
+  "productPathCount": 0,
+  "queryParamCount": 0,
+  "legacySamples": [],
+  "productPathSamples": [],
+  "queryParamSamples": [],
+  "itemContainerCount": 0,
+  "sqeLinkCount": 0,
+  "firstContainerHtml": null,
+  "firstCardSample": null,
+  "cardDetails": [],
+  "searchApiUrl": "/api/v4/search/search_items?by=relevancy&keyword=&limit=5&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2"
+}

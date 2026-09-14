@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
 import { scannerEvents } from './events';
+import { closeActiveContext, getActiveContext, setActiveContext } from './browser-context';
 
 const PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
 
@@ -11,25 +12,30 @@ export async function openShopeeSession(): Promise<{ success: boolean; message?:
       fs.mkdirSync(PROFILE_DIR, { recursive: true });
     }
 
-    scannerEvents.emit('step', 'Iniciando navegador Chromium com perfil persistente...');
+    // Fecha uma sessão anterior para liberar o perfil persistente antes de abrir outra
+    if (getActiveContext()) {
+      scannerEvents.emit('info', 'Fechando navegador de sessão anterior...');
+      await closeActiveContext();
+    }
+
+    scannerEvents.emit('step', 'Iniciando navegador Chromium visível com perfil persistente...');
 
     const context = await chromium.launchPersistentContext(PROFILE_DIR, {
       headless: false,
+      channel: 'chrome',
       viewport: { width: 1280, height: 800 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       args: [
-        '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--start-maximized',
       ],
     });
+    setActiveContext(context);
 
     const pages = context.pages();
     const page = pages.length > 0 ? pages[0] : await context.newPage();
 
-    scannerEvents.emit('info', 'Navegando para a página de login da Shopee Brasil...');
-    await page.goto('https://shopee.com.br/buyer/login', {
+    scannerEvents.emit('info', 'Navegando para a página da Shopee Brasil...');
+    await page.goto('https://shopee.com.br', {
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
@@ -41,10 +47,8 @@ export async function openShopeeSession(): Promise<{ success: boolean; message?:
 
     // Keep context alive until the user closes the browser
     page.on('close', async () => {
-      try {
-        await context.close();
-        scannerEvents.emit('info', 'Sessão do navegador encerrada e cookies salvos localmente.');
-      } catch {}
+      await closeActiveContext();
+      scannerEvents.emit('info', 'Sessão do navegador encerrada e cookies salvos localmente.');
     });
 
     return { success: true, message: 'Navegador aberto com sucesso.' };

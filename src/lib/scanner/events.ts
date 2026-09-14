@@ -6,6 +6,7 @@ class ScannerEventEmitter {
   private listeners: Set<LogListener> = new Set();
   private recentLogs: ScanLogEvent[] = [];
   private isScanning: boolean = false;
+  private isVideoProcessing: boolean = false;
 
   public subscribe(listener: LogListener): () => void {
     this.listeners.add(listener);
@@ -45,6 +46,14 @@ class ScannerEventEmitter {
 
   public getIsScanning(): boolean {
     return this.isScanning;
+  }
+
+  public setVideoProcessing(processing: boolean) {
+    this.isVideoProcessing = processing;
+  }
+
+  public getVideoProcessing(): boolean {
+    return this.isVideoProcessing;
   }
 
   public clear() {

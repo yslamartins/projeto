@@ -3,6 +3,7 @@ import {
   parseSalesCount,
   extractShopeeProductId,
   normalizeShopeeUrl,
+  isShopeeProductUrl,
   isProductEligible,
   formatPrice,
 } from './parser';
@@ -44,12 +45,60 @@ describe('Shopee Parser Unit Tests', () => {
       const url = 'https://shopee.com.br/product/111222333/444555666';
       expect(extractShopeeProductId(url)).toBe('111222333.444555666');
     });
+
+    it('should extract from shopid/itemid query params', () => {
+      const url = 'https://shopee.com.br/item?sp_atk=xyz&shopid=111222333&itemid=444555666';
+      expect(extractShopeeProductId(url)).toBe('111222333.444555666');
+    });
+
+    it('should extract from relative product path', () => {
+      const url = '/product/111222333/444555666?sp_atk=abc';
+      expect(extractShopeeProductId(url)).toBe('111222333.444555666');
+    });
+  });
+
+  describe('isShopeeProductUrl', () => {
+    it('should accept legacy -i. slug URLs', () => {
+      expect(isShopeeProductUrl('https://shopee.com.br/Projetor-Portatil-i.123.456')).toBe(true);
+    });
+
+    it('should accept current /product/<shopId>/<itemId> URLs', () => {
+      expect(isShopeeProductUrl('https://shopee.com.br/product/123/456')).toBe(true);
+    });
+
+    it('should accept shopid/itemid query param URLs', () => {
+      expect(isShopeeProductUrl('https://shopee.com.br/item?shopid=123&itemid=456')).toBe(true);
+      expect(isShopeeProductUrl('https://shopee.com.br/p?sp_atk=abc&shopid=123&itemid=456')).toBe(true);
+    });
+
+    it('should accept relative product URLs', () => {
+      expect(isShopeeProductUrl('/product/123/456')).toBe(true);
+      expect(isShopeeProductUrl('/Capa-de-Chuva-i.123.456')).toBe(true);
+    });
+
+    it('should reject non-product links', () => {
+      expect(isShopeeProductUrl('https://shopee.com.br/m/campanha-promocional-frete-gratis')).toBe(false);
+      expect(isShopeeProductUrl('https://shopee.com.br/')).toBe(false);
+      expect(isShopeeProductUrl('https://shopee.com.br/product/abc/def')).toBe(false);
+      expect(isShopeeProductUrl('https://shopee.com.br/item?shopid=abc&itemid=def')).toBe(false);
+      expect(isShopeeProductUrl('')).toBe(false);
+    });
   });
 
   describe('normalizeShopeeUrl', () => {
     it('should strip tracking parameters', () => {
       const url = 'https://shopee.com.br/Produto-Teste-i.123.456?sp_atk=xyz&xpt=123';
       expect(normalizeShopeeUrl(url)).toBe('https://shopee.com.br/Produto-Teste-i.123.456');
+    });
+
+    it('should keep current /product/ canonical URLs', () => {
+      const url = 'https://shopee.com.br/product/123/456?sp_atk=xyz';
+      expect(normalizeShopeeUrl(url)).toBe('https://shopee.com.br/product/123/456');
+    });
+
+    it('should convert shopid/itemid query URLs to /product/ canonical', () => {
+      const url = 'https://shopee.com.br/item?sp_atk=xyz&shopid=123&itemid=456';
+      expect(normalizeShopeeUrl(url)).toBe('https://shopee.com.br/product/123/456');
     });
   });
 

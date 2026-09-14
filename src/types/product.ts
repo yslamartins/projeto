@@ -1,5 +1,7 @@
 export type ProductStatus = 'pending' | 'published' | 'discarded';
 
+export type VideoStatus = 'none' | 'searched' | 'downloaded' | 'failed';
+
 export interface Product {
   id: string;
   title: string;
@@ -9,6 +11,10 @@ export interface Product {
   productUrl: string;
   searchTerm: string;
   status: ProductStatus;
+  tikTokUrl: string | null;
+  videoUrl: string | null;
+  videoPath: string | null;
+  videoStatus: VideoStatus;
   createdAt: string | Date;
   updatedAt: string | Date;
 }
