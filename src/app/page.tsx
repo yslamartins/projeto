@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Play, LogIn, Eye, Sparkles, RefreshCw, Filter } from 'lucide-react';
+import { Play, LogIn, Eye, Sparkles, RefreshCw, Filter, Video, Trash2 } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { ProductCard } from '@/components/ProductCard';
 import { TerminalDrawer } from '@/components/TerminalDrawer';
@@ -14,6 +14,9 @@ export default function Dashboard() {
   const [headfulMode, setHeadfulMode] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isLaunchingSession, setIsLaunchingSession] = useState(false);
+  const [isLaunchingTikTok, setIsLaunchingTikTok] = useState(false);
+  const [isResettingProfile, setIsResettingProfile] = useState(false);
+  const [videoSearchingId, setVideoSearchingId] = useState<string | null>(null);
   const [logs, setLogs] = useState<ScanLogEvent[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
@@ -161,6 +164,171 @@ export default function Dashboard() {
     }
   };
 
+  const handleLaunchTikTokSession = async () => {
+    if (isLaunchingTikTok) return;
+    setIsLaunchingTikTok(true);
+    setIsDrawerOpen(true);
+    addLog('step', 'Abrindo navegador persistente para autenticação no TikTok...');
+
+    try {
+      const res = await fetch('/api/tiktok/session', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        addLog('success', 'TikTok aberto! Faça o login ou resolva verificações se necessário.');
+      } else {
+        addLog('error', `Falha ao abrir TikTok: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao comunicar com o servidor: ${err.message}`);
+    } finally {
+      setIsLaunchingTikTok(false);
+    }
+  };
+
+  const handleResetProfile = async () => {
+    if (isResettingProfile || isScanning) return;
+    if (!window.confirm('Resetar o perfil da Shopee? Isso remove o cookie anti-bot gravado e permite tentar o login do zero. O perfil atual será salvo em /backups.')) {
+      return;
+    }
+    setIsResettingProfile(true);
+    setIsDrawerOpen(true);
+    addLog('step', 'Resetando perfil persistente da Shopee (anti-bot)...');
+
+    try {
+      const res = await fetch('/api/scanner/profile/reset', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        addLog('success', data.message);
+      } else {
+        addLog('error', `Falha ao resetar perfil: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao resetar perfil: ${err.message}`);
+    } finally {
+      setIsResettingProfile(false);
+    }
+  };
+
+  const handleSearchVideo = async (id: string) => {
+    if (videoSearchingId) return;
+    setVideoSearchingId(id);
+    setIsDrawerOpen(true);
+
+    const eventSource = new EventSource('/api/scanner/logs');
+    eventSource.onmessage = (event) => {
+      try {
+        const logData = JSON.parse(event.data);
+        addLog(logData.type || 'info', logData.message);
+      } catch {
+        addLog('info', event.data);
+      }
+    };
+    eventSource.onerror = () => eventSource.close();
+
+    addLog('step', `Buscando vídeo no TikTok para o produto selecionado...`);
+
+    try {
+      const res = await fetch('/api/video/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: id, headful: headfulMode }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        addLog('success', 'Vídeo encontrado e link salvo no produto.');
+        fetchProducts();
+      } else {
+        addLog('error', `Busca de vídeo falhou: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao buscar vídeo: ${err.message}`);
+    } finally {
+      eventSource.close();
+      setVideoSearchingId(null);
+    }
+  };
+
+  const handleDownloadVideo = async (id: string) => {
+    if (videoSearchingId) return;
+    setVideoSearchingId(id);
+    setIsDrawerOpen(true);
+
+    const eventSource = new EventSource('/api/scanner/logs');
+    eventSource.onmessage = (event) => {
+      try {
+        const logData = JSON.parse(event.data);
+        addLog(logData.type || 'info', logData.message);
+      } catch {
+        addLog('info', event.data);
+      }
+    };
+    eventSource.onerror = () => eventSource.close();
+
+    addLog('step', `Iniciando download do vídeo via ssstik.io...`);
+
+    try {
+      const res = await fetch('/api/video/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: id, headful: headfulMode }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        addLog('success', 'Vídeo baixado com sucesso!');
+        fetchProducts();
+      } else {
+        addLog('error', `Download falhou: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao baixar vídeo: ${err.message}`);
+    } finally {
+      eventSource.close();
+      setVideoSearchingId(null);
+    }
+  };
+
+  const handlePipelineVideo = async (id: string) => {
+    if (videoSearchingId) return;
+    setVideoSearchingId(id);
+    setIsDrawerOpen(true);
+
+    const eventSource = new EventSource('/api/scanner/logs');
+    eventSource.onmessage = (event) => {
+      try {
+        const logData = JSON.parse(event.data);
+        addLog(logData.type || 'info', logData.message);
+      } catch {
+        addLog('info', event.data);
+      }
+    };
+    eventSource.onerror = () => eventSource.close();
+
+    addLog('step', `Pipeline: buscar e baixar vídeo do TikTok (termo do produto)...`);
+
+    try {
+      const res = await fetch('/api/video/pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: id, headful: headfulMode }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        addLog('success', 'Pipeline concluído: vídeo baixado e pronto para acesso.');
+        fetchProducts();
+      } else {
+        addLog('error', `Pipeline falhou (etapa ${data.step || '?'}): ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao executar pipeline: ${err.message}`);
+    } finally {
+      eventSource.close();
+      setVideoSearchingId(null);
+    }
+  };
+
   const handleStatusChange = async (id: string, newStatus: ProductStatus) => {
     try {
       const res = await fetch(`/api/products/${id}`, {
@@ -239,6 +407,28 @@ export default function Dashboard() {
             >
               <LogIn className="w-4 h-4 text-gray-500" />
               <span>{isLaunchingSession ? 'Abrindo...' : 'Login Shopee'}</span>
+            </button>
+
+            {/* Login TikTok Button */}
+            <button
+              type="button"
+              onClick={handleLaunchTikTokSession}
+              disabled={isLaunchingTikTok || isScanning}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition shadow-sm disabled:opacity-50"
+            >
+              <Video className="w-4 h-4 text-gray-500" />
+              <span>{isLaunchingTikTok ? 'Abrindo...' : 'Login TikTok'}</span>
+            </button>
+
+            {/* Reset Shopee Profile Button */}
+            <button
+              type="button"
+              onClick={handleResetProfile}
+              disabled={isResettingProfile || isScanning}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-red-50 border border-red-200 text-red-600 text-xs font-semibold rounded-xl transition shadow-sm disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>{isResettingProfile ? 'Resetando...' : 'Limpar Perfil'}</span>
             </button>
 
             {/* Start Scan Button */}
@@ -402,6 +592,10 @@ export default function Dashboard() {
                   product={product}
                   onStatusChange={handleStatusChange}
                   onDelete={handleDeleteProduct}
+                  onSearchVideo={handleSearchVideo}
+                  onDownloadVideo={handleDownloadVideo}
+                  onPipelineVideo={handlePipelineVideo}
+                  videoProcessing={videoSearchingId === product.id}
                 />
               ))}
             </div>

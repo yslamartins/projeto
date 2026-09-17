@@ -1,5 +1,6 @@
 import { Page } from 'playwright';
 import { RawCardData } from './product-card-parser';
+import { extractShopeeProductId } from './parser';
 
 /**
  * Estrutura típica dos itens retornados pelo endpoint interno de busca da
@@ -9,6 +10,45 @@ import { RawCardData } from './product-card-parser';
 export interface ApiSearchItemResult {
   gated: boolean;
   items: any[];
+}
+
+/**
+ * Constroi um mapa `"<shopId>.<itemId>" -> vendas` a partir dos itens da API.
+ * O preço/vendas podem vir em `item_basic` (padrão) ou no próprio item.
+ * `historical_sold` é a contagem de vendas da Shopee BR atual.
+ */
+export function buildApiSalesMap(items: any[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    const basic = item?.item_basic || item;
+    const itemid = basic?.itemid ?? item?.itemid;
+    const shopid = basic?.shopid ?? item?.shopid;
+    const sold = Number(basic?.historical_sold ?? basic?.sold ?? 0);
+    if (itemid && shopid && Number.isFinite(sold) && sold > 0) {
+      map.set(`${shopid}.${itemid}`, sold);
+    }
+  }
+  return map;
+}
+
+/**
+ * Enriquece cards vindos da DOM com o contador de vendas obtido da API interna.
+ * O card de busca da Shopee BR atual não exibe mais "N vendidos" no DOM, então
+ * a elegibilidade (>= 5 vendas) depende exclusivamente dos dados da API.
+ */
+export function enrichRawCardsWithApiSales(
+  rawCards: RawCardData[],
+  salesMap: Map<string, number>
+): RawCardData[] {
+  return rawCards.map((card) => {
+    if (card.rawSalesText) return card;
+    const id = extractShopeeProductId(card.rawHref);
+    const sold = id ? salesMap.get(id) : undefined;
+    if (sold) {
+      return { ...card, rawSalesText: `${sold} vendidos` };
+    }
+    return card;
+  });
 }
 
 export function mapApiItemToRawCard(item: any): RawCardData | null {

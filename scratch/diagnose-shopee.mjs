@@ -19,10 +19,11 @@ async function diagnose() {
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: !headful,
     channel: 'chrome',
+    chromiumSandbox: true,
     viewport: { width: 1366, height: 768 },
-    args: [
-      '--disable-blink-features=AutomationControlled',
-    ],
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
   const page = context.pages()[0] || (await context.newPage());

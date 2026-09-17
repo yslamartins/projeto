@@ -1,4 +1,4 @@
-import { chromium, BrowserContext, Page } from 'playwright';
+import { BrowserContext, Page } from 'playwright';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
@@ -10,9 +10,17 @@ import {
   formatPrice,
   isProductEligible,
 } from './parser';
-import { parseProductCard } from './product-card-parser';
-import { fetchSearchItems, mapApiItemToRawCard } from './api-search';
+import { parseProductCard, RawCardData } from './product-card-parser';
+import {
+  fetchSearchItems,
+  mapApiItemToRawCard,
+  buildApiSalesMap,
+  enrichRawCardsWithApiSales,
+} from './api-search';
 import { closeActiveContext, getActiveContext, setActiveContext } from './browser-context';
+import { launchManagedChrome } from './chrome-launcher';
+import { installAntiDetect } from './stealth';
+import { humanDelay, humanScroll, humanMouseIdle, resetCursor } from './humanize';
 
 const PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
 
@@ -153,19 +161,38 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       await closeActiveContext();
     }
 
-    context = await chromium.launchPersistentContext(PROFILE_DIR, {
+    const managed = await launchManagedChrome({
+      userDataDir: PROFILE_DIR,
       headless: isHeadless,
-      channel: 'chrome',
-      viewport: { width: 1366, height: 768 },
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--disable-web-security',
-      ],
     });
-    setActiveContext(context);
+    context = managed.context;
+    setActiveContext(context, managed.dispose);
+
+    // Anti-detecção antes de qualquer navegação (webdriver, plugins, WebGL...)
+    await installAntiDetect(context);
 
     const pages = context.pages();
     const page: Page = pages.length > 0 ? pages[0] : await context.newPage();
+
+    // Observa o console da página: telemetria interna da Shopee (APMS) e
+    // erros do bundle JS (modules-federation) são ruído que sempre contém
+    // palavras como "captcha" e não indicam bloqueio real. Só mensagens fora
+    // desse ruído com captcha/verificação/bloqueio viram aviso acionável.
+    const seenConsoleSignals = new Set<string>();
+    page.on('console', (msg) => {
+      const text = msg.text().trim();
+      if (!text) return;
+      if (/\[APMS\]|^Error at /.test(text)) return;
+      if (/captcha|verifica|bloque|robô|robot|anti-?bot/i.test(text)) {
+        const key = text.slice(0, 80);
+        if (seenConsoleSignals.has(key)) return;
+        seenConsoleSignals.add(key);
+        scannerEvents.emit(
+          'warn',
+          `Shopee (console): ${text.slice(0, 160)}`
+        );
+      }
+    });
 
     // 3. Obter termos de "Buscas em alta"
     let trendingTerms: string[] = [];
@@ -182,10 +209,13 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
           timeout: 35000,
         });
 
-        // Scroll para carregar a seção de Buscas em alta na home
-        await page.waitForTimeout(2000);
-        await page.mouse.wheel(0, 1000);
-        await page.waitForTimeout(1500);
+        // Comportamento humano: posiciona o cursor, "pensa" antes de agir e
+        // rola lentamente para carregar a seção de Buscas em alta.
+        await resetCursor(page);
+        await humanDelay(1500, 3000);
+        await humanScroll(page, 1200);
+        await humanDelay(600, 1400);
+        await humanMouseIdle(page);
 
         const extracted = await page.evaluate(() => {
           const terms: string[] = [];
@@ -277,10 +307,16 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       )}&sortBy=ctime`;
 
       try {
+        // Pausa "pensada" antes de navegar (um humano não clica no instante)
+        // e referer = página Shopee anterior, como se fosse um clique interno.
+        await humanDelay(900, 2000);
+        const referer = page.url() || 'https://shopee.com.br/';
         await page.goto(searchUrl, {
           waitUntil: 'domcontentloaded',
           timeout: 30000,
+          referer,
         });
+        await resetCursor(page);
 
         // Bloqueio (gate anti-bot ou login-wall): aborta com mensagem acionável em vez de reportar "0 produtos"
         const blockMessage = await maybeBlockMessage(page);
@@ -299,7 +335,9 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
           await page.goto(searchUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 30000,
+            referer: page.url() || 'https://shopee.com.br/',
           });
+          await resetCursor(page);
           const blockMessage = await maybeBlockMessage(page);
           if (blockMessage) {
             scannerEvents.emit('error', blockMessage);
@@ -308,21 +346,20 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
           resultsReady = await waitForSearchResults(page);
         }
 
-        // Simula scroll suave para carregar as imagens e badges de até 30 produtos
-        await page.waitForTimeout(1500);
-        await page.mouse.wheel(0, 600);
-        await page.waitForTimeout(1000);
-        await page.mouse.wheel(0, 1000);
-        await page.waitForTimeout(1500);
+        // Rola suavemente como um usuário, carregando imagens de até 30 produtos
+        await humanDelay(1200, 2400);
+        await humanScroll(page, 1700);
+        await humanDelay(400, 900);
+        await humanMouseIdle(page);
 
         // Extrai até os primeiros 30 produtos da página
-        const rawProducts = await page.evaluate(() => {
+        const rawProductsInit = await page.evaluate(() => {
           const items: Array<{
-            href: string;
-            title: string;
-            price: string;
-            salesText: string;
-            imageUrl: string;
+            rawHref: string;
+            rawTitle: string;
+            rawPrice: string;
+            rawSalesText: string;
+            rawImageUrl: string;
           }> = [];
 
           // Seletores comuns da grade de produtos da Shopee (formatos -i. e /product/)
@@ -389,11 +426,11 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
 
             if (title && href) {
               items.push({
-                href,
-                title,
-                price: price || 'R$ 0,00',
-                salesText,
-                imageUrl,
+                rawHref: href,
+                rawTitle: title,
+                rawPrice: price || 'R$ 0,00',
+                rawSalesText: salesText,
+                rawImageUrl: imageUrl,
               });
             }
           });
@@ -401,37 +438,57 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
           return items;
         });
 
-        // Fallback (DOM primeiro, API JSON interna somente se o DOM não retornou nada)
-        if (rawProducts.length === 0) {
-          scannerEvents.emit(
-            'info',
-            `[Termo "${term}"] DOM não retornou cards; tentando o endpoint interno de busca da Shopee...`
-          );
+        let rawProducts: RawCardData[] = rawProductsInit;
 
-          const api = await fetchSearchItems(page, term, 30);
-          if (api.gated) {
+        // Busca dados de vendas via API interna: o card de busca da Shopee BR atual
+        // não mostra mais "N vendidos" no DOM, então a elegibilidade (>= 5
+        // vendas) é decidida com item_basic.sold, histórico de vendas real.
+        await humanDelay(1400, 3200);
+        const api = await fetchSearchItems(page, term, 30);
+        let salesCounted = 0;
+
+        if (api.gated) {
+          // Gate anti-bot. Se nem o DOM retornou nada, aborta com mensagem
+          // acionável; se o DOM voltou, avisa que vendas ficaram indisponíveis.
+          if (rawProducts.length === 0) {
             const blockMessage = (await maybeBlockMessage(page)) || SECURITY_GATE_MESSAGE;
             scannerEvents.emit('error', blockMessage);
             return { success: false, error: blockMessage };
           }
-
-          for (const item of api.items) {
-            if (rawProducts.length >= 30) break;
-            const mapped = mapApiItemToRawCard(item);
-            if (!mapped) continue;
-            rawProducts.push({
-              href: mapped.rawHref,
-              title: mapped.rawTitle,
-              price: mapped.rawPrice,
-              salesText: mapped.rawSalesText,
-              imageUrl: mapped.rawImageUrl || '',
-            });
-          }
-
           scannerEvents.emit(
-            'info',
-            `[Termo "${term}"] ${rawProducts.length} produtos obtidos via API interna.`
+            'warn',
+            `[Termo "${term}"] API de vendas bloqueada (gate); usando apenas o que aparece na página.`
           );
+        } else {
+          const salesMap = buildApiSalesMap(api.items);
+
+          if (rawProducts.length === 0) {
+            // DOM sem cards mas API respondeu: produtos vêm da API interna
+            scannerEvents.emit(
+              'info',
+              `[Termo "${term}"] DOM não retornou cards; usando o endpoint interno da Shopee...`
+            );
+            for (const item of api.items) {
+              if (rawProducts.length >= 30) break;
+              const mapped = mapApiItemToRawCard(item);
+              if (!mapped) continue;
+              rawProducts.push(mapped);
+            }
+            scannerEvents.emit(
+              'info',
+              `[Termo "${term}"] ${rawProducts.length} produtos obtidos via API interna.`
+            );
+          } else if (salesMap.size > 0) {
+            // DOM renderizou os cards mas sem contagem de vendas: enriquece
+            // casando por <shopid>.<itemid> com item_basic.historical_sold.
+            const before = rawProducts.length;
+            rawProducts = enrichRawCardsWithApiSales(rawProducts, salesMap);
+            salesCounted = rawProducts.filter((r) => r.rawSalesText).length;
+            scannerEvents.emit(
+              'info',
+              `[Termo "${term}"] Contagem de vendas aplicada: ${salesCounted}/${before} produtos com contador real da API.`
+            );
+          }
         }
 
         scannerEvents.emit(
@@ -442,16 +499,7 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
         // Processa cada produto verificado com o seam testado parseProductCard
         for (let j = 0; j < rawProducts.length; j++) {
           const raw = rawProducts[j];
-          const candidate = parseProductCard(
-            {
-              rawHref: raw.href,
-              rawTitle: raw.title,
-              rawPrice: raw.price,
-              rawSalesText: raw.salesText,
-              rawImageUrl: raw.imageUrl,
-            },
-            existingIds
-          );
+          const candidate = parseProductCard(raw, existingIds);
 
           // Se for elegível (>= 5 vendas e ainda não cadastrado)
           if (candidate && candidate.isEligible) {

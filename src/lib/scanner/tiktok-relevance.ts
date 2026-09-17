@@ -4,6 +4,19 @@ export interface TikTokSearchCard {
   author: string;
 }
 
+/**
+ * Termo de busca no TikTok a partir do nome do produto: usa as primeiras
+ * `words` palavras (padrão 5) do título, removendo pontuação das bordas.
+ */
+export function buildTikTokSearchTerm(title: string, words: number = 5): string {
+  const tokens = title.split(/\s+/).filter(Boolean);
+  return tokens
+    .slice(0, words)
+    .map((token) => token.replace(/^[^A-Za-z0-9À-ÿ]+|[^A-Za-z0-9À-ÿ]+$/g, ''))
+    .filter(Boolean)
+    .join(' ');
+}
+
 export interface RankedTikTokVideo {
   card: TikTokSearchCard;
   score: number;

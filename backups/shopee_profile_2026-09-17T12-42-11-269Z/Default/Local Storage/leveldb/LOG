@@ -1,0 +1,9 @@
+2026/09/17-09:30:41.637 4ef0 Reusing MANIFEST C:\projeto\.shopee_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/09/17-09:30:41.646 4ef0 Recovering log #3
+2026/09/17-09:30:41.653 4ef0 Reusing old log C:\projeto\.shopee_profile\Default\Local Storage\leveldb/000003.log 
+2026/09/17-09:33:49.268 4ef0 Level-0 table #5: started
+2026/09/17-09:33:49.276 4ef0 Level-0 table #5: 24376 bytes OK
+2026/09/17-09:33:49.281 4ef0 Delete type=0 #3
+2026/09/17-09:38:50.984 1f14 Level-0 table #7: started
+2026/09/17-09:38:50.994 1f14 Level-0 table #7: 16053 bytes OK
+2026/09/17-09:38:51.132 1f14 Delete type=0 #4

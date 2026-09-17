@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mapApiItemToRawCard, fetchSearchItems } from './api-search';
+import {
+  mapApiItemToRawCard,
+  fetchSearchItems,
+  buildApiSalesMap,
+  enrichRawCardsWithApiSales,
+} from './api-search';
 import { parseProductCard } from './product-card-parser';
 
 describe('api-search (fallback JSON interno da Shopee)', () => {
@@ -79,5 +84,77 @@ describe('api-search (fallback JSON interno da Shopee)', () => {
       term: 'Projetor',
       limit: 30,
     });
+  });
+});
+
+describe('buildApiSalesMap', () => {
+  it('indexa vendas por <shopid>.<itemid> usando historical_sold (item_basic)', () => {
+    const map = buildApiSalesMap([
+      { item_basic: { itemid: '111', shopid: '222', historical_sold: 120 } },
+      { item_basic: { itemid: '333', shopid: '444', historical_sold: 8 } },
+    ]);
+    expect(map.get('222.111')).toBe(120);
+    expect(map.get('444.333')).toBe(8);
+  });
+
+  it('aceita itens sem item_basic (dados diretos) e sold', () => {
+    const map = buildApiSalesMap([{ itemid: '1', shopid: '2', sold: 15 }]);
+    expect(map.get('2.1')).toBe(15);
+  });
+
+  it('ignora itens sem id ou com vendas 0', () => {
+    const map = buildApiSalesMap([
+      { item_basic: { itemid: '1', shopid: '2', historical_sold: 0 } },
+      { item_basic: { name: 'x' } },
+    ]);
+    expect(map.size).toBe(0);
+  });
+});
+
+describe('enrichRawCardsWithApiSales', () => {
+  it('preenche rawSalesText de cards do DOM que nasceram sem contador', () => {
+    const cards = [
+      {
+        rawHref: 'https://shopee.com.br/product/222/111',
+        rawTitle: 'Projetor X',
+        rawPrice: 'R$ 99,90',
+        rawSalesText: '',
+      },
+    ];
+    const map = buildApiSalesMap([
+      { item_basic: { itemid: '111', shopid: '222', historical_sold: 250 } },
+    ]);
+
+    const enriched = enrichRawCardsWithApiSales(cards, map);
+    expect(enriched[0].rawSalesText).toBe('250 vendidos');
+  });
+
+  it('não sobrescreve cards que já têm contador e ignora sem match', () => {
+    const cards = [
+      { rawHref: 'https://shopee.com.br/product/2/1', rawTitle: 'A', rawPrice: '', rawSalesText: '10 vendidos' },
+      { rawHref: 'https://shopee.com.br/product/2/999', rawTitle: 'B', rawPrice: '', rawSalesText: '' },
+    ];
+    const map = buildApiSalesMap([{ item_basic: { itemid: '1', shopid: '2', historical_sold: 50 } }]);
+
+    const enriched = enrichRawCardsWithApiSales(cards, map);
+    expect(enriched[0].rawSalesText).toBe('10 vendidos');
+    expect(enriched[1].rawSalesText).toBe('');
+  });
+
+  it('produz candidato elegível quando o DOM não tem vendas mas a API sim', () => {
+    const card = {
+      rawHref: 'https://shopee.com.br/product/222/111',
+      rawTitle: 'Projetor X',
+      rawPrice: 'R$ 99,90',
+      rawSalesText: '',
+    };
+    const map = buildApiSalesMap([
+      { item_basic: { itemid: '111', shopid: '222', historical_sold: 40 } },
+    ]);
+
+    const candidate = parseProductCard(enrichRawCardsWithApiSales([card], map)[0], new Set());
+    expect(candidate).not.toBeNull();
+    expect(candidate?.salesCount).toBe(40);
+    expect(candidate?.isEligible).toBe(true);
   });
 });

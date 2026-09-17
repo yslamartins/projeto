@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildTikTokSearchTerm,
   extractTikTokVideoId,
   normalizeTikTokText,
   rankTikTokVideos,
@@ -13,6 +14,34 @@ const card = (over: Partial<TikTokSearchCard>): TikTokSearchCard => ({
   caption: 'Projetor mini portátil 4K review completo',
   author: 'lojadetecnologia',
   ...over,
+});
+
+describe('buildTikTokSearchTerm', () => {
+  it('usa as 5 primeiras palavras do título do produto', () => {
+    expect(buildTikTokSearchTerm('Projetor Portátil WiFi 4K com Controle Remoto')).toBe(
+      'Projetor Portátil WiFi 4K com'
+    );
+  });
+
+  it('mantém o título inteiro quando tem menos de 5 palavras', () => {
+    expect(buildTikTokSearchTerm('Pião Fever Profissional')).toBe('Pião Fever Profissional');
+  });
+
+  it('remove pontuação/emojis das bordas dos tokens', () => {
+    expect(buildTikTokSearchTerm('Capa de Chuva Moto, Tamanho Único (Preto)!')).toBe(
+      'Capa de Chuva Moto Tamanho'
+    );
+  });
+
+  it('colapsa espaços extras', () => {
+    expect(buildTikTokSearchTerm('  Mouse   Sem   Fio  (2.4G)  silencioso ')).toBe(
+      'Mouse Sem Fio 2.4G silencioso'
+    );
+  });
+
+  it('retorna string vazia para título vazio', () => {
+    expect(buildTikTokSearchTerm('')).toBe('');
+  });
 });
 
 describe('normalizeTikTokText', () => {

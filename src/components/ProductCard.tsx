@@ -1,23 +1,36 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ExternalLink, Copy, Check, TrendingUp, Tag, Trash2 } from 'lucide-react';
+import { ExternalLink, Copy, Check, TrendingUp, Tag, Trash2, Video, Loader2, Download } from 'lucide-react';
 import { Product, ProductStatus } from '@/types/product';
 
 interface ProductCardProps {
   product: Product;
   onStatusChange: (id: string, newStatus: ProductStatus) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  onSearchVideo?: (id: string) => Promise<void>;
+  onDownloadVideo?: (id: string) => Promise<void>;
+  onPipelineVideo?: (id: string) => Promise<void>;
+  videoProcessing?: boolean;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
   product,
   onStatusChange,
   onDelete,
+  onSearchVideo,
+  onDownloadVideo,
+  onPipelineVideo,
+  videoProcessing,
 }) => {
   const [copied, setCopied] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [imgError, setImgError] = useState(false);
+
+  const searching = Boolean(videoProcessing);
+  const videoAvailable = product.videoStatus === 'downloaded' && product.videoPath;
+  const canSearch = onSearchVideo && (!product.tikTokUrl && product.videoStatus === 'none');
+  const canDownload = onDownloadVideo && product.tikTokUrl && !videoAvailable && product.videoStatus !== 'failed';
 
   const handleCopyLink = async () => {
     try {
@@ -139,8 +152,93 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </select>
         </div>
 
+        {/* Video Status Badge */}
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-medium text-gray-500">Vídeo:</label>
+          <span
+            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
+              product.videoStatus === 'downloaded'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : product.videoStatus === 'searched'
+                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                : product.videoStatus === 'failed'
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-gray-100 text-gray-500 border-gray-200'
+            }`}
+          >
+            {product.videoStatus === 'downloaded' && 'Baixado'}
+            {product.videoStatus === 'searched' && 'Pesquisado'}
+            {product.videoStatus === 'failed' && 'Falhou'}
+            {product.videoStatus === 'none' && 'Sem vídeo'}
+          </span>
+        </div>
+
         {/* Buttons */}
-        <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+        <div className="space-y-2">
+          {onPipelineVideo && onSearchVideo && onDownloadVideo && (
+            <>
+              {videoAvailable ? (
+                <>
+                  <a
+                    href={`/api/video/file?id=${product.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 w-full text-xs font-semibold py-2 px-2.5 bg-black hover:bg-gray-800 text-white rounded-xl transition shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar / ver vídeo</span>
+                    <ExternalLink className="w-3 h-3 opacity-60" />
+                  </a>
+                  <video
+                    src={`/api/video/file?id=${product.id}`}
+                    controls
+                    muted
+                    playsInline
+                    className="w-full max-h-44 rounded-xl bg-gray-900 border border-gray-200"
+                  />
+                </>
+              ) : product.tikTokUrl ? (
+                <button
+                  type="button"
+                  onClick={() => onDownloadVideo(product.id)}
+                  disabled={searching}
+                  className="inline-flex items-center justify-center gap-1.5 w-full text-xs font-semibold py-2 px-2.5 bg-[#EE4D2D] hover:bg-[#D03E1F] text-white rounded-xl transition shadow-sm disabled:opacity-50"
+                >
+                  {searching ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Baixando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{product.videoStatus === 'failed' ? 'Tentar baixar novamente' : 'Baixar vídeo (HD)'}</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onPipelineVideo(product.id)}
+                  disabled={searching}
+                  className="inline-flex items-center justify-center gap-1.5 w-full text-xs font-semibold py-2 px-2.5 bg-black hover:bg-gray-800 text-white rounded-xl transition shadow-sm disabled:opacity-50"
+                >
+                  {searching ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Buscando e baixando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-3.5 h-3.5" />
+                      <span>Buscar e Baixar Vídeo</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </>
+          )}
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
           <button
             type="button"
             onClick={handleCopyLink}
@@ -179,6 +277,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
+          </div>
         </div>
       </div>
     </div>
