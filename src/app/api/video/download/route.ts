@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { downloadTikTokVideo } from '@/lib/tikdrop/download';
+import { sendVideoAndLinkToGroup } from '@/lib/whatsapp/send';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,10 @@ export async function POST(request: NextRequest) {
         videoStatus: 'downloaded',
       },
     });
+
+    if (updated.videoPath) {
+      await sendVideoAndLinkToGroup(updated, updated.videoPath);
+    }
 
     return NextResponse.json({ success: true, product: updated });
   } catch (error: any) {

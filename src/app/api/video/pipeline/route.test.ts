@@ -27,8 +27,13 @@ const downloadModule = vi.hoisted(() => ({
   downloadTikTokVideo: vi.fn(),
 }));
 
+const whatsappSendModule = vi.hoisted(() => ({
+  sendVideoAndLinkToGroup: vi.fn(),
+}));
+
 vi.mock('@/lib/scanner/tiktok-search', () => searchModule);
 vi.mock('@/lib/tikdrop/download', () => downloadModule);
+vi.mock('@/lib/whatsapp/send', () => whatsappSendModule);
 
 import { POST } from './route';
 import { prisma } from '@/lib/prisma';
@@ -143,5 +148,54 @@ describe('POST /api/video/pipeline', () => {
         productId: baseProduct.id,
       })
     );
+  });
+
+  it('envia vídeo e link ao WhatsApp após download bem-sucedido', async () => {
+    searchModule.searchTikTokVideo.mockResolvedValue({
+      success: true,
+      videoUrl: 'https://www.tiktok.com/@u/video/123',
+    });
+    downloadModule.downloadTikTokVideo.mockResolvedValue({
+      success: true,
+      videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
+      videoPath: 'C:\\projeto\\.videos\\abc.mp4',
+    });
+    whatsappSendModule.sendVideoAndLinkToGroup.mockResolvedValue({ success: true });
+
+    const res = await callPipeline(baseProduct.id);
+    const data = await res.json();
+
+    expect(data.success).toBe(true);
+    expect(whatsappSendModule.sendVideoAndLinkToGroup).toHaveBeenCalledTimes(1);
+    expect(whatsappSendModule.sendVideoAndLinkToGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: baseProduct.id,
+        title: baseProduct.title,
+        videoPath: 'C:\\projeto\\.videos\\abc.mp4',
+      }),
+      'C:\\projeto\\.videos\\abc.mp4'
+    );
+  });
+
+  it('falha no envio ao WhatsApp não derruba o pipeline (best-effort)', async () => {
+    searchModule.searchTikTokVideo.mockResolvedValue({
+      success: true,
+      videoUrl: 'https://www.tiktok.com/@u/video/123',
+    });
+    downloadModule.downloadTikTokVideo.mockResolvedValue({
+      success: true,
+      videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
+      videoPath: 'C:\\projeto\\.videos\\abc.mp4',
+    });
+    whatsappSendModule.sendVideoAndLinkToGroup.mockResolvedValue({
+      success: false,
+      error: 'WhatsApp não está conectado',
+    });
+
+    const res = await callPipeline(baseProduct.id);
+    const data = await res.json();
+
+    expect(data.success).toBe(true);
+    expect(data.product.videoStatus).toBe('downloaded');
   });
 });

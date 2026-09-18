@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Após download bem-sucedido em ambos os fluxos ("Baixar Vídeo" e pipeline), o vídeo `.mp4` salvo é enviado para o grupo com nome exatamente igual a "SHOPEE VIDEO"
-- [ ] Legenda da mídia contém o nome do produto e o link do produto no Shopee
-- [ ] Grupo não encontrado, sessão não conectada ou falha de rede resultam em erro amigável via SSE, sem alterar `videoStatus` (continua `downloaded`)
-- [ ] Logs SSE cobrem cada etapa do envio (conectando/procurando grupo → enviando vídeo → vídeo enviado ou erro não bloqueante)
-- [ ] Testes com envio mockado cobrem: envio com sucesso, grupo não encontrado e sessão não conectada (sem depender de rede/WhatsApp real)
+- [x] Após download bem-sucedido em ambos os fluxos ("Baixar Vídeo" e pipeline), o vídeo `.mp4` salvo é enviado para o grupo com nome exatamente igual a "SHOPEE VIDEO"
+- [x] Legenda da mídia contém o nome do produto e o link do produto no Shopee
+- [x] Grupo não encontrado, sessão não conectada ou falha de rede resultam em erro amigável via SSE, sem alterar `videoStatus` (continua `downloaded`)
+- [x] Logs SSE cobrem cada etapa do envio (conectando/procurando grupo → enviando vídeo → vídeo enviado ou erro não bloqueante)
+- [x] Testes com envio mockado cobrem: envio com sucesso, grupo não encontrado e sessão não conectada (sem depender de rede/WhatsApp real)
