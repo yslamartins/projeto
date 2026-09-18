@@ -32,6 +32,7 @@ vi.mock('./client', () => ({
 }));
 
 import {
+  connectWhatsAppOrLog,
   sendProductVideoToWhatsApp,
   sendVideoAndLinkToGroup,
 } from './send';
@@ -99,13 +100,29 @@ describe('sendVideoAndLinkToGroup', () => {
     expect(mocks.mockSendMessage).not.toHaveBeenCalled();
   });
 
-  it('retorna erro quando o WhatsApp não está conectado', async () => {
+  it('retoma a sessão salva e envia quando estava desconectado', async () => {
+    vi.mocked(getWhatsAppState)
+      .mockReturnValueOnce('disconnected')
+      .mockReturnValue('connected');
+    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4', 500);
+
+    expect(result.success).toBe(true);
+    expect(ensureWhatsAppSession).toHaveBeenCalledTimes(2);
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('retorna erro sem enviar quando não conecta dentro do tempo de espera', async () => {
     vi.mocked(getWhatsAppState).mockReturnValue('disconnected');
-    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4');
+    const result = await sendVideoAndLinkToGroup(
+      fakeProduct,
+      '/tmp/video.mp4',
+      60
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('WhatsApp não está conectado');
-    expect(ensureWhatsAppSession).not.toHaveBeenCalled();
+    expect(ensureWhatsAppSession).toHaveBeenCalledTimes(1);
+    expect(mocks.mockSendMessage).not.toHaveBeenCalled();
   });
 
   it('retorna erro quando sendMessage falha', async () => {
@@ -114,6 +131,30 @@ describe('sendVideoAndLinkToGroup', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('network error');
+  });
+});
+
+describe('connectWhatsAppOrLog', () => {
+  it('retorna o client imediatamente quando está conectado', async () => {
+    const client = await connectWhatsAppOrLog(200);
+    expect(ensureWhatsAppSession).toHaveBeenCalledTimes(1);
+    expect(client).toBeTruthy();
+  });
+
+  it('espera a sessão salva conectar e então retorna o client', async () => {
+    vi.mocked(getWhatsAppState)
+      .mockReturnValueOnce('disconnected')
+      .mockReturnValueOnce('connecting')
+      .mockReturnValue('connected');
+    const client = await connectWhatsAppOrLog(1000);
+    expect(client).toBeTruthy();
+    expect(ensureWhatsAppSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('retorna null quando a sessão não conecta até o fim da espera', async () => {
+    vi.mocked(getWhatsAppState).mockReturnValue('disconnected');
+    const client = await connectWhatsAppOrLog(80);
+    expect(client).toBeNull();
   });
 });
 
