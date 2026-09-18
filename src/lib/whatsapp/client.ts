@@ -12,6 +12,8 @@ export interface WhatsAppQrResult {
 const SESSION_DIR = '.whatsapp';
 const QR_WAIT_TIMEOUT_MS = 20000;
 const QR_POLL_INTERVAL_MS = 300;
+const INIT_RETRY_DELAY_MS = 1500;
+const MAX_INIT_ATTEMPTS = 2;
 
 interface WhatsAppRuntime {
   state: WhatsAppState;
@@ -33,10 +35,11 @@ function markDisconnected(): void {
   runtime.clientPromise = null;
 }
 
-function teardownClient(client: Client): void {
-  runtime.teardown = (runtime.teardown ?? Promise.resolve()).then(() =>
-    client.destroy().catch(() => {})
-  );
+function scheduleTeardown(client: Client): void {
+  const afterInit = (runtime.clientPromise ?? Promise.resolve(client)).catch(() => undefined);
+  runtime.teardown = (runtime.teardown ?? Promise.resolve())
+    .then(() => afterInit)
+    .then(() => client.destroy().catch(() => {}));
 }
 
 function printQrToTerminal(qr: string): void {
@@ -81,13 +84,13 @@ function buildClient(): Client {
 
   client.on('auth_failure', (message) => {
     markDisconnected();
-    teardownClient(client);
+    scheduleTeardown(client);
     scannerEvents.emit('error', `WhatsApp: falha na autenticação (${message}).`);
   });
 
   client.on('disconnected', (reason) => {
     markDisconnected();
-    teardownClient(client);
+    scheduleTeardown(client);
     scannerEvents.emit('warn', `WhatsApp: sessão desconectada (${reason}).`);
   });
 
@@ -95,22 +98,43 @@ function buildClient(): Client {
 }
 
 async function initializeClient(): Promise<Client> {
-  scannerEvents.emit('step', 'WhatsApp: iniciando sessão (WhatsApp Web)...');
+  let lastError: unknown;
 
-  if (runtime.teardown) {
-    await runtime.teardown;
+  for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt += 1) {
+    scannerEvents.emit(
+      'step',
+      attempt === 1
+        ? 'WhatsApp: iniciando sessão (WhatsApp Web)...'
+        : `WhatsApp: tentando iniciar a sessão novamente (tentativa ${attempt}/${MAX_INIT_ATTEMPTS})...`
+    );
+
+    if (runtime.teardown) {
+      await runtime.teardown;
+      runtime.teardown = null;
+    }
+
+    const client = buildClient();
+    const initialize = client.initialize();
+    initialize.catch(() => {});
+    try {
+      await initialize;
+      return client;
+    } catch (error) {
+      lastError = error;
+      scannerEvents.emit(
+        'warn',
+        `WhatsApp: falha ao iniciar a sessão (tentativa ${attempt}/${MAX_INIT_ATTEMPTS}).`
+      );
+      markDisconnected();
+      scheduleTeardown(client);
+      if (attempt < MAX_INIT_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, INIT_RETRY_DELAY_MS));
+      }
+    }
   }
 
-  const client = buildClient();
-  try {
-    await client.initialize();
-    return client;
-  } catch (error) {
-    markDisconnected();
-    teardownClient(client);
-    scannerEvents.emit('error', 'WhatsApp: não foi possível iniciar a sessão.');
-    throw error;
-  }
+  scannerEvents.emit('error', 'WhatsApp: não foi possível iniciar a sessão.');
+  throw lastError;
 }
 
 export async function ensureWhatsAppSession(): Promise<Client> {

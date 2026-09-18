@@ -3,12 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const testState = vi.hoisted(() => {
   const handlers = new Map<string, Array<(...args: any[]) => void>>();
   let failInitialize = false;
+  let remainingFails = 0;
   return {
     handlers,
     setFailInitialize: (value: boolean) => {
       failInitialize = value;
     },
-    shouldFailInitialize: () => failInitialize,
+    setFailTimes: (value: number) => {
+      remainingFails = value;
+    },
+    shouldFailInitialize: () => {
+      if (remainingFails > 0) {
+        remainingFails -= 1;
+        return true;
+      }
+      return failInitialize;
+    },
   };
 });
 
@@ -61,6 +71,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   resetWhatsAppSessionForTests();
   testState.handlers.clear();
+  testState.setFailTimes(0);
 });
 
 describe('ensureWhatsAppSession', () => {
@@ -78,6 +89,13 @@ describe('ensureWhatsAppSession', () => {
     testState.setFailInitialize(false);
     const client = await ensureWhatsAppSession();
     expect(client).toBeTruthy();
+  });
+
+  it('tenta de novo quando a primeira inicialização falha de forma transitória', async () => {
+    testState.setFailTimes(1);
+    const client = await ensureWhatsAppSession();
+    expect(client).toBeTruthy();
+    expect(getWhatsAppState()).toBe('disconnected');
   });
 });
 
