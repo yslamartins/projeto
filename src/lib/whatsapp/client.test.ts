@@ -34,6 +34,9 @@ vi.mock('whatsapp-web.js', () => {
 vi.mock('qrcode', () => ({
   __esModule: true,
   toDataURL: vi.fn(async (qr: string) => `data:image/png;base64,${qr}`),
+  toString: vi.fn((_qr: string, _options: unknown, cb: (err: Error | null, out: string) => void) =>
+    cb(null, 'QR-ASCII')
+  ),
 }));
 
 import {

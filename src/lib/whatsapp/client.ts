@@ -1,5 +1,5 @@
 import { Client, LocalAuth } from 'whatsapp-web.js';
-import { toDataURL as qrToDataURL } from 'qrcode';
+import { toString as qrToString, toDataURL as qrToDataURL } from 'qrcode';
 import { scannerEvents } from '@/lib/scanner/events';
 
 export type WhatsAppState = 'disconnected' | 'waiting_qr' | 'connecting' | 'connected';
@@ -39,6 +39,18 @@ function teardownClient(client: Client): void {
   );
 }
 
+function printQrToTerminal(qr: string): void {
+  qrToString(
+    qr,
+    { type: 'terminal', small: true },
+    (error, terminal) => {
+      if (!error && terminal) {
+        console.log('\n[WhatsApp] Escaneie o QR code abaixo:\n' + terminal + '\n');
+      }
+    }
+  );
+}
+
 function buildClient(): Client {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
@@ -51,6 +63,7 @@ function buildClient(): Client {
   client.on('qr', (qr) => {
     runtime.currentQr = qr;
     runtime.state = 'waiting_qr';
+    printQrToTerminal(qr);
     scannerEvents.emit('step', 'WhatsApp: escaneie o QR code para conectar.');
     scannerEvents.emit('info', 'WhatsApp: um novo QR code foi gerado.', { qrAvailable: true });
   });
