@@ -4,8 +4,13 @@ const testState = vi.hoisted(() => {
   const handlers = new Map<string, Array<(...args: any[]) => void>>();
   let failInitialize = false;
   let remainingFails = 0;
+  let clientOptions: any = null;
   return {
     handlers,
+    getClientOptions: () => clientOptions,
+    setClientOptions: (options: any) => {
+      clientOptions = options;
+    },
     setFailInitialize: (value: boolean) => {
       failInitialize = value;
     },
@@ -37,6 +42,9 @@ vi.mock('whatsapp-web.js', () => {
       testState.handlers.set(event, list);
       return this;
     });
+    constructor(options: any) {
+      testState.setClientOptions(options);
+    }
   }
   return { Client: FakeClient, LocalAuth: class {} };
 });
@@ -79,6 +87,13 @@ describe('ensureWhatsAppSession', () => {
     const client1 = await ensureWhatsAppSession();
     const client2 = await ensureWhatsAppSession();
     expect(client1).toBe(client2);
+  });
+
+  it('abre o WhatsApp Web em Chrome visível por padrão', async () => {
+    await ensureWhatsAppSession();
+    expect(testState.getClientOptions()).toMatchObject({
+      puppeteer: { headless: false },
+    });
   });
 
   it('transita para disconnected quando a inicialização falha', async () => {

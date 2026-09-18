@@ -58,7 +58,7 @@ function buildClient(): Client {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
     puppeteer: {
-      headless: true,
+      headless: process.env.WHATSAPP_HEADLESS === 'true',
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     },
   });
