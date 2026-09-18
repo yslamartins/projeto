@@ -1,5 +1,7 @@
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import { toString as qrToString, toDataURL as qrToDataURL } from 'qrcode';
+import { spawn } from 'child_process';
+import path from 'path';
 import { scannerEvents } from '@/lib/scanner/events';
 
 export type WhatsAppState = 'disconnected' | 'waiting_qr' | 'connecting' | 'connected';
@@ -58,7 +60,7 @@ function buildClient(): Client {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
     puppeteer: {
-      headless: process.env.WHATSAPP_HEADLESS === 'true',
+      headless: process.env.WHATSAPP_HEADLESS !== 'false',
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     },
   });

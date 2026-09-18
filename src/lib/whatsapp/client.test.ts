@@ -89,11 +89,28 @@ describe('ensureWhatsAppSession', () => {
     expect(client1).toBe(client2);
   });
 
-  it('abre o WhatsApp Web em Chrome visível por padrão', async () => {
+  it('roda o Chrome em modo oculto por padrão', async () => {
     await ensureWhatsAppSession();
     expect(testState.getClientOptions()).toMatchObject({
-      puppeteer: { headless: false },
+      puppeteer: { headless: true },
     });
+  });
+
+  it('abre o Chrome visível quando WHATSAPP_HEADLESS=false', async () => {
+    const original = process.env.WHATSAPP_HEADLESS;
+    process.env.WHATSAPP_HEADLESS = 'false';
+    try {
+      await ensureWhatsAppSession();
+      expect(testState.getClientOptions()).toMatchObject({
+        puppeteer: { headless: false },
+      });
+    } finally {
+      if (original === undefined) {
+        delete process.env.WHATSAPP_HEADLESS;
+      } else {
+        process.env.WHATSAPP_HEADLESS = original;
+      }
+    }
   });
 
   it('transita para disconnected quando a inicialização falha', async () => {
