@@ -42,6 +42,7 @@ import {
   requestWhatsAppQr,
   resetWhatsAppSessionForTests,
 } from './client';
+import { scannerEvents } from '@/lib/scanner/events';
 
 function emitEvent(event: string, ...args: any[]) {
   for (const listener of testState.handlers.get(event) ?? []) {
@@ -54,6 +55,7 @@ function nextTick() {
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   resetWhatsAppSessionForTests();
   testState.handlers.clear();
 });
@@ -91,6 +93,36 @@ describe('eventos de conexão', () => {
     });
   });
 
+  it('qr emite logs SSE informando que o QR está disponível', () => {
+    const emitSpy = vi.spyOn(scannerEvents, 'emit');
+    const pending = requestWhatsAppQr();
+    return nextTick().then(() => {
+      emitEvent('qr', 'RAW_QR_CODE');
+      return pending.then(() => {
+        const calls = emitSpy.mock.calls;
+        expect(calls.some(([type, message]) => type === 'step' && message.includes('escaneie'))).toBe(
+          true
+        );
+        expect(calls.some(([type, , data]) => type === 'info' && data?.qrAvailable === true)).toBe(
+          true
+        );
+      });
+    });
+  });
+
+  it('ready emite log SSE de sucesso', () => {
+    const emitSpy = vi.spyOn(scannerEvents, 'emit');
+    const pending = requestWhatsAppQr();
+    return nextTick().then(() => {
+      emitEvent('ready');
+      return pending.then(() => {
+        expect(
+          emitSpy.mock.calls.some(([type, message]) => type === 'success' && message.includes('conectado'))
+        ).toBe(true);
+      });
+    });
+  });
+
   it('authenticated → connecting, ready → connected', () => {
     const pending = requestWhatsAppQr().then((result) => result);
     return nextTick()
@@ -120,6 +152,16 @@ describe('eventos de conexão', () => {
   it('disconnected volta para disconnected e libera a sessão para nova tentativa', async () => {
     const first = await ensureWhatsAppSession();
     emitEvent('disconnected', 'LOGOUT');
+    await nextTick();
+    expect(getWhatsAppState()).toBe('disconnected');
+
+    const second = await ensureWhatsAppSession();
+    expect(second).not.toBe(first);
+  });
+
+  it('auth_failure volta para disconnected e permite nova tentativa com outro cliente', async () => {
+    const first = await ensureWhatsAppSession();
+    emitEvent('auth_failure', 'Invalid key');
     await nextTick();
     expect(getWhatsAppState()).toBe('disconnected');
 

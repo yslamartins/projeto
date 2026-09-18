@@ -7,9 +7,11 @@ export async function GET() {
   try {
     const result = await requestWhatsAppQr();
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Falha ao obter o QR do WhatsApp';
     return NextResponse.json(
-      { state: 'disconnected', qr: null, error: error.message || 'Falha ao obter o QR do WhatsApp' },
+      { state: 'disconnected', qr: null, error: message },
       { status: 500 }
     );
   }

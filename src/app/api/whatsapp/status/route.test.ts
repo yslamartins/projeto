@@ -18,4 +18,10 @@ describe('GET /api/whatsapp/status', () => {
     const response = await GET();
     expect(await response.json()).toEqual({ state: 'connected' });
   });
+
+  it('reflete o estado aguardando QR', async () => {
+    vi.mocked(getWhatsAppState).mockReturnValue('waiting_qr');
+    const response = await GET();
+    expect(await response.json()).toEqual({ state: 'waiting_qr' });
+  });
 });

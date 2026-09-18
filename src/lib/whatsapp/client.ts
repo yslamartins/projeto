@@ -1,7 +1,6 @@
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import { toDataURL as qrToDataURL } from 'qrcode';
 import { scannerEvents } from '@/lib/scanner/events';
-import type { ScanLogEvent } from '@/types/product';
 
 export type WhatsAppState = 'disconnected' | 'waiting_qr' | 'connecting' | 'connected';
 
@@ -18,16 +17,26 @@ interface WhatsAppRuntime {
   state: WhatsAppState;
   currentQr: string | null;
   clientPromise: Promise<Client> | null;
+  teardown: Promise<void> | null;
 }
 
 const runtime: WhatsAppRuntime = {
   state: 'disconnected',
   currentQr: null,
   clientPromise: null,
+  teardown: null,
 };
 
-function emit(type: ScanLogEvent['type'], message: string, data?: any) {
-  scannerEvents.emit(type, message, data);
+function markDisconnected(): void {
+  runtime.state = 'disconnected';
+  runtime.currentQr = null;
+  runtime.clientPromise = null;
+}
+
+function teardownClient(client: Client): void {
+  runtime.teardown = (runtime.teardown ?? Promise.resolve()).then(() =>
+    client.destroy().catch(() => {})
+  );
 }
 
 function buildClient(): Client {
@@ -42,50 +51,51 @@ function buildClient(): Client {
   client.on('qr', (qr) => {
     runtime.currentQr = qr;
     runtime.state = 'waiting_qr';
-    emit('step', 'WhatsApp: escaneie o QR code para conectar.');
-    emit('info', 'WhatsApp: um novo QR code foi gerado.', { qrAvailable: true });
+    scannerEvents.emit('step', 'WhatsApp: escaneie o QR code para conectar.');
+    scannerEvents.emit('info', 'WhatsApp: um novo QR code foi gerado.', { qrAvailable: true });
   });
 
   client.on('authenticated', () => {
     runtime.state = 'connecting';
-    emit('info', 'WhatsApp: autenticado, preparando a sessão...');
+    scannerEvents.emit('info', 'WhatsApp: autenticado, preparando a sessão...');
   });
 
   client.on('ready', () => {
     runtime.currentQr = null;
     runtime.state = 'connected';
-    emit('success', 'WhatsApp: conectado.');
+    scannerEvents.emit('success', 'WhatsApp: conectado.');
   });
 
   client.on('auth_failure', (message) => {
-    runtime.state = 'disconnected';
-    emit('error', `WhatsApp: falha na autenticação (${message}).`);
+    markDisconnected();
+    teardownClient(client);
+    scannerEvents.emit('error', `WhatsApp: falha na autenticação (${message}).`);
   });
 
   client.on('disconnected', (reason) => {
-    runtime.currentQr = null;
-    runtime.state = 'disconnected';
-    runtime.clientPromise = null;
-    emit('warn', `WhatsApp: sessão desconectada (${reason}).`);
-    client.destroy().catch(() => {});
+    markDisconnected();
+    teardownClient(client);
+    scannerEvents.emit('warn', `WhatsApp: sessão desconectada (${reason}).`);
   });
 
   return client;
 }
 
 async function initializeClient(): Promise<Client> {
-  emit('step', 'WhatsApp: iniciando sessão (WhatsApp Web)...');
+  scannerEvents.emit('step', 'WhatsApp: iniciando sessão (WhatsApp Web)...');
+
+  if (runtime.teardown) {
+    await runtime.teardown;
+  }
 
   const client = buildClient();
   try {
     await client.initialize();
     return client;
   } catch (error) {
-    runtime.currentQr = null;
-    runtime.state = 'disconnected';
-    runtime.clientPromise = null;
-    emit('error', 'WhatsApp: não foi possível iniciar a sessão.');
-    client.destroy().catch(() => {});
+    markDisconnected();
+    teardownClient(client);
+    scannerEvents.emit('error', 'WhatsApp: não foi possível iniciar a sessão.');
     throw error;
   }
 }
@@ -123,8 +133,9 @@ export async function requestWhatsAppQr(
   return { state: runtime.state, qr: null };
 }
 
-export function resetWhatsAppSessionForTests() {
+export function resetWhatsAppSessionForTests(): void {
   runtime.state = 'disconnected';
   runtime.currentQr = null;
   runtime.clientPromise = null;
+  runtime.teardown = null;
 }
