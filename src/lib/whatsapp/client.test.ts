@@ -1,0 +1,136 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const testState = vi.hoisted(() => {
+  const handlers = new Map<string, Array<(...args: any[]) => void>>();
+  let failInitialize = false;
+  return {
+    handlers,
+    setFailInitialize: (value: boolean) => {
+      failInitialize = value;
+    },
+    shouldFailInitialize: () => failInitialize,
+  };
+});
+
+vi.mock('whatsapp-web.js', () => {
+  class FakeClient {
+    initialize = vi.fn(async () => {
+      if (testState.shouldFailInitialize()) {
+        throw new Error('browser boom');
+      }
+      return undefined;
+    });
+    destroy = vi.fn(async () => {});
+    on = vi.fn((event: string, listener: (...args: any[]) => void) => {
+      const list = testState.handlers.get(event) ?? [];
+      list.push(listener);
+      testState.handlers.set(event, list);
+      return this;
+    });
+  }
+  return { Client: FakeClient, LocalAuth: class {} };
+});
+
+vi.mock('qrcode', () => ({
+  __esModule: true,
+  toDataURL: vi.fn(async (qr: string) => `data:image/png;base64,${qr}`),
+}));
+
+import {
+  ensureWhatsAppSession,
+  getWhatsAppState,
+  requestWhatsAppQr,
+  resetWhatsAppSessionForTests,
+} from './client';
+
+function emitEvent(event: string, ...args: any[]) {
+  for (const listener of testState.handlers.get(event) ?? []) {
+    listener(...args);
+  }
+}
+
+function nextTick() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+beforeEach(() => {
+  resetWhatsAppSessionForTests();
+  testState.handlers.clear();
+});
+
+describe('ensureWhatsAppSession', () => {
+  it('inicializa um cliente e retorna a mesma instância em chamadas seguintes', async () => {
+    const client1 = await ensureWhatsAppSession();
+    const client2 = await ensureWhatsAppSession();
+    expect(client1).toBe(client2);
+  });
+
+  it('transita para disconnected quando a inicialização falha', async () => {
+    testState.setFailInitialize(true);
+    await expect(ensureWhatsAppSession()).rejects.toThrow();
+    expect(getWhatsAppState()).toBe('disconnected');
+
+    testState.setFailInitialize(false);
+    const client = await ensureWhatsAppSession();
+    expect(client).toBeTruthy();
+  });
+});
+
+describe('eventos de conexão', () => {
+  it('qr → waiting_qr com data URL da imagem', () => {
+    const pending = requestWhatsAppQr().then((result) => result);
+    return nextTick().then(() => {
+      emitEvent('qr', 'RAW_QR_CODE');
+      return pending.then((result) => {
+        expect(getWhatsAppState()).toBe('waiting_qr');
+        expect(result).toEqual({
+          state: 'waiting_qr',
+          qr: 'data:image/png;base64,RAW_QR_CODE',
+        });
+      });
+    });
+  });
+
+  it('authenticated → connecting, ready → connected', () => {
+    const pending = requestWhatsAppQr().then((result) => result);
+    return nextTick()
+      .then(() => {
+        emitEvent('qr', 'RAW_QR_CODE');
+        expect(getWhatsAppState()).toBe('waiting_qr');
+        emitEvent('authenticated');
+        expect(getWhatsAppState()).toBe('connecting');
+        emitEvent('ready');
+        expect(getWhatsAppState()).toBe('connected');
+        return pending;
+      })
+      .then((result) => {
+        expect(result).toEqual({ state: 'connected', qr: null });
+      });
+  });
+
+  it('ready limpa o QR atual', async () => {
+    const pending = requestWhatsAppQr();
+    await nextTick();
+    emitEvent('qr', 'RAW_QR_CODE');
+    emitEvent('ready');
+    const result = await pending;
+    expect(result.qr).toBeNull();
+  });
+
+  it('disconnected volta para disconnected e libera a sessão para nova tentativa', async () => {
+    const first = await ensureWhatsAppSession();
+    emitEvent('disconnected', 'LOGOUT');
+    await nextTick();
+    expect(getWhatsAppState()).toBe('disconnected');
+
+    const second = await ensureWhatsAppSession();
+    expect(second).not.toBe(first);
+  });
+});
+
+describe('requestWhatsAppQr', () => {
+  it('retorna qr null se o QR não chegar dentro do timeout', async () => {
+    const result = await requestWhatsAppQr(50);
+    expect(result.qr).toBeNull();
+  });
+});

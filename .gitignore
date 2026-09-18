@@ -16,6 +16,9 @@ out/
 .tiktok_profile/
 .ssstik_profile/
 .videos/
+.whatsapp/
+.wwebjs_auth/
+.wwebjs_cache/
 test-results/
 playwright-report/
 
