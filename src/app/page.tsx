@@ -265,7 +265,7 @@ export default function Dashboard() {
     };
     eventSource.onerror = () => eventSource.close();
 
-    addLog('step', `Iniciando download do vídeo via ssstik.io...`);
+    addLog('step', `Iniciando download do vídeo via TikDrop...`);
 
     try {
       const res = await fetch('/api/video/download', {

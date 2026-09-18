@@ -1,7 +1,7 @@
 # ADR 0001: Fluxo de Vídeo TikTok + Download via ssstik
 
 Data: 2026-09-14
-Status: Accepted
+Status: Accepted. Download via ssstik substituído pelo ADR 0002 (TikDrop).
 
 ## Context
 

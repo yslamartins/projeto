@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { downloadTikTokVideo } from '@/lib/ssstik/download';
+import { downloadTikTokVideo } from '@/lib/tikdrop/download';
 
 export const dynamic = 'force-dynamic';
 

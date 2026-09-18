@@ -8,7 +8,7 @@ As a Shopee affiliate seeking to publish high-converting content on Shopee Video
 
 ## Solution
 
-An automated local web application that monitors Shopee's trending searches, analyzes the newest products, automatically selects up to 10 fresh products per search term (products with at least 5 sales, prioritizing quantity per term), and records their details (image, title, price, sales count, and link) in an intuitive management dashboard. For each opportunity, the app can also find a relevant TikTok video by product name and download it in HD via ssstik.io, storing references in the database and the MP4 in a private folder. The user can easily open a browser for one-time login verification, trigger scans on demand, watch real-time scan logs via Server-Sent Events, run the video pipeline, and update the status of each opportunity (Pending, Video Published, Discarded).
+An automated local web application that monitors Shopee's trending searches, analyzes the newest products, automatically selects up to 10 fresh products per search term (products with at least 5 sales, prioritizing quantity per term), and records their details (image, title, price, sales count, and link) in an intuitive management dashboard. For each opportunity, the app can also find a relevant TikTok video by product name and download it in HD via TikDrop, storing references in the database and the MP4 in a private folder. The user can easily open a browser for one-time login verification, trigger scans on demand, watch real-time scan logs via Server-Sent Events, run the video pipeline, and update the status of each opportunity (Pending, Video Published, Discarded).
 
 ## User Stories
 
@@ -29,7 +29,7 @@ An automated local web application that monitors Shopee's trending searches, ana
 15. As a Shopee affiliate, I want to update the status of each product between "Pendente", "Vídeo Publicado", and "Descartado" so that my content pipeline remains organized.
 16. As a Shopee affiliate, I want all data stored in a lightweight local SQLite database so that my setup requires no cloud services or external databases.
 17. As a Shopee affiliate, I want the system to search TikTok for the product's name and pick the FIRST RELEVANT video (not the first result) so that the video actually matches the product.
-18. As a Shopee affiliate, I want the system to download the chosen TikTok video in HD via ssstik.io (waiting through the ad) and register the local file and links in the product, so that I have the video ready to use.
+18. As a Shopee affiliate, I want the system to download the chosen TikTok video in HD via TikDrop (API HTTP, sem marca d'água, sem navegador) and register the local file and links in the product, so that I have the video ready to use.
 19. As a Shopee affiliate, I want a one-click "Buscar e Baixar Vídeo" pipeline that chains search and download, reporting every step via SSE, so that I don't have to run the flows one by one.
 20. As a Shopee affiliate, I want the video file stored in a private folder (references only in the database, never the binary) and served through an API route, so that videos aren't exposed as public static files.
 21. As a Shopee affiliate, I want completing a download to set `videoStatus="downloaded"` WITHOUT automatically changing the product status, so that I keep control over when an item is published.

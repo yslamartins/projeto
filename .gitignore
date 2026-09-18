@@ -14,6 +14,7 @@ out/
 # Playwright & Shopee Session Profile
 .shopee_profile/
 .tiktok_profile/
+.ssstik_profile/
 .videos/
 test-results/
 playwright-report/

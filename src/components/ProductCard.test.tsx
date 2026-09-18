@@ -56,7 +56,7 @@ describe('ProductCard: exibição condicional de vídeo', () => {
     const html = render({
       videoStatus: 'downloaded',
       tikTokUrl: 'https://www.tiktok.com/@u/video/123',
-      videoUrl: 'https://ssstik.io/dl/hd',
+      videoUrl: 'https://v16-webapp-prime.us.tiktok.com/video/tos/algo.mp4',
       videoPath: 'C:\\projeto\\.videos\\00000000-0000-0000-0000-000000000001.mp4',
     });
     expect(html).toContain('Baixado');

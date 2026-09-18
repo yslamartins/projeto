@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { searchTikTokVideo } from '@/lib/scanner/tiktok-search';
-import { downloadTikTokVideo } from '@/lib/ssstik/download';
+import { downloadTikTokVideo } from '@/lib/tikdrop/download';
 import { scannerEvents } from '@/lib/scanner/events';
 import { buildTikTokSearchTerm } from '@/lib/scanner/tiktok-relevance';
 
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     );
 
     // ---------- ETAPA 2: DOWNLOAD ----------
-    scannerEvents.emit('step', 'Pipeline: iniciando download via ssstik.io...');
+    scannerEvents.emit('step', 'Pipeline: iniciando download via TikDrop...');
     const downloadResult = await downloadTikTokVideo({
       tikTokUrl: searchResult.videoUrl,
       productId: updatedProduct.id,

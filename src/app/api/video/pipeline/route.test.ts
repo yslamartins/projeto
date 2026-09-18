@@ -28,7 +28,7 @@ const downloadModule = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/scanner/tiktok-search', () => searchModule);
-vi.mock('@/lib/ssstik/download', () => downloadModule);
+vi.mock('@/lib/tikdrop/download', () => downloadModule);
 
 import { POST } from './route';
 import { prisma } from '@/lib/prisma';
@@ -102,7 +102,7 @@ describe('POST /api/video/pipeline', () => {
     });
     downloadModule.downloadTikTokVideo.mockResolvedValue({
       success: false,
-      error: 'ssstik bloqueou',
+      error: 'tikdrop bloqueou',
     });
 
     const res = await callPipeline(baseProduct.id);
@@ -110,7 +110,7 @@ describe('POST /api/video/pipeline', () => {
 
     expect(data.success).toBe(false);
     expect(data.step).toBe('download');
-    expect(data.error).toBe('ssstik bloqueou');
+    expect(data.error).toBe('tikdrop bloqueou');
 
     const updateCalls = mockUpdate.mock.calls;
     const statuses = updateCalls.map((c: any) => c[0].data.videoStatus);
@@ -124,7 +124,7 @@ describe('POST /api/video/pipeline', () => {
     });
     downloadModule.downloadTikTokVideo.mockResolvedValue({
       success: true,
-      videoUrl: 'https://ssstik.io/dl/hd',
+      videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
       videoPath: 'C:\\projeto\\.videos\\abc.mp4',
     });
 
