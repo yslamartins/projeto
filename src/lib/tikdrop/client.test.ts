@@ -105,6 +105,29 @@ describe('resolveTikTokVideo', () => {
     const result = await resolveTikTokVideo('https://www.tiktok.com/@loja/video/123');
     expect(result).toEqual({ ok: false, error: { code: 'internal_error' } });
   });
+
+  it('resposta ok:false no corpo HTTP 200 propaga o código', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(mockResponse({ ok: false, error: { code: 'video_unavailable' } }))
+    );
+    const result = await resolveTikTokVideo('https://www.tiktok.com/@loja/video/123');
+    expect(result).toEqual({ ok: false, error: { code: 'video_unavailable' } });
+  });
+
+  it('resposta ok sem media.videoUrl vira internal_error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockResponse({
+          ok: true,
+          data: { id: '1', type: 'video', title: 'x', filename: 'x.mp4' },
+        })
+      )
+    );
+    const result = await resolveTikTokVideo('https://www.tiktok.com/@loja/video/123');
+    expect(result).toEqual({ ok: false, error: { code: 'internal_error' } });
+  });
 });
 
 describe('downloadTikTokVideoMp4', () => {

@@ -153,6 +153,24 @@ describe('downloadTikTokVideo (via TikDrop)', () => {
     expect(result.error).toContain('TikDrop limitou');
   });
 
+  it('falha inesperada mapeia para mensagem amigável e apaga arquivo parcial', async () => {
+    clientMock.resolveTikTokVideo.mockResolvedValue({ ok: true, data: resolvedVideo });
+    clientMock.downloadTikTokVideoMp4.mockImplementation(async ({ outPath: p }: any) => {
+      writeValidMp4(p);
+      throw new Error('socket hang up');
+    });
+
+    const result = await downloadTikTokVideo({
+      tikTokUrl: 'https://www.tiktok.com/@loja/video/123456789',
+      productId: 'tikdrop-test',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('conectar');
+    expect(result.error).not.toContain('socket hang up');
+    expect(fs.existsSync(outPath)).toBe(false);
+  });
+
   it('recusa quando outra automação está em andamento', async () => {
     (scannerEvents.getIsScanning as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
 

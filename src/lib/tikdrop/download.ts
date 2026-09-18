@@ -113,8 +113,10 @@ export async function downloadTikTokVideo(options: {
     };
   } catch (error: any) {
     console.error('Error downloading TikTok video:', error);
-    scannerEvents.emit('error', `Erro ao baixar vídeo: ${error.message}`);
-    return { success: false, error: error.message };
+    fs.rmSync(outPath, { force: true });
+    const message = tikDropErrorToMessage('network');
+    scannerEvents.emit('error', message);
+    return { success: false, error: message };
   } finally {
     scannerEvents.setVideoProcessing(false);
   }

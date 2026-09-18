@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { Readable } from 'stream';
+import type { ReadableStream as WebReadableStream } from 'stream/web';
 import { pipeline } from 'stream/promises';
 
 const DEFAULT_TIKDROP_API_URL = 'https://tikdrop-k8re.onrender.com';
@@ -71,19 +72,32 @@ export async function resolveTikTokVideo(url: string): Promise<TikDropResolveRes
   }
 
   const body = await response.text().catch(() => '');
-  let parsed: { ok?: boolean; data?: TikDropResolveData; error?: { code?: string } } | null = null;
+  if (!response.ok) {
+    return { ok: false, error: { code: parseErrorCode(body) } };
+  }
+
+  let parsed: { ok?: boolean; data?: TikDropResolveData } | null = null;
   try {
     parsed = body ? JSON.parse(body) : null;
   } catch {
     parsed = null;
   }
 
-  if (!response.ok || !parsed?.ok || !parsed?.data) {
-    const code = parsed?.error?.code ?? 'internal_error';
-    return { ok: false, error: { code: code as TikDropErrorCode } };
+  if (!parsed?.ok || !parsed?.data) {
+    return { ok: false, error: { code: parseErrorCode(body) } };
   }
 
-  return { ok: true, data: parsed.data };
+  const data = parsed.data;
+  if (
+    typeof data.id !== 'string' ||
+    typeof data.type !== 'string' ||
+    !data.media ||
+    typeof data.media.videoUrl !== 'string'
+  ) {
+    return { ok: false, error: { code: 'internal_error' } };
+  }
+
+  return { ok: true, data };
 }
 
 export async function downloadTikTokVideoMp4(options: {
@@ -109,7 +123,7 @@ export async function downloadTikTokVideoMp4(options: {
   }
 
   await pipeline(
-    Readable.fromWeb(response.body as unknown as import('stream/web').ReadableStream),
+    Readable.fromWeb(response.body as WebReadableStream),
     fs.createWriteStream(options.outPath, { flags: 'w' })
   );
 
