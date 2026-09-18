@@ -4,7 +4,7 @@ import { searchTikTokVideo } from '@/lib/scanner/tiktok-search';
 import { downloadTikTokVideo } from '@/lib/tikdrop/download';
 import { scannerEvents } from '@/lib/scanner/events';
 import { buildTikTokSearchTerm } from '@/lib/scanner/tiktok-relevance';
-import { sendVideoAndLinkToGroup } from '@/lib/whatsapp/send';
+import { sendProductVideoToWhatsApp } from '@/lib/whatsapp/send';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,9 +110,7 @@ export async function POST(request: NextRequest) {
       `Pipeline concluído! Vídeo salvo no disco para o produto.`
     );
 
-    if (finalProduct.videoPath) {
-      await sendVideoAndLinkToGroup(finalProduct, finalProduct.videoPath);
-    }
+    await sendProductVideoToWhatsApp(finalProduct, finalProduct.videoPath);
 
     return NextResponse.json({ success: true, product: finalProduct });
   } catch (error: any) {

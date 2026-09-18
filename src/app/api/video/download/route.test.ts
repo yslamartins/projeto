@@ -14,7 +14,7 @@ const downloadModule = vi.hoisted(() => ({
 }));
 
 const whatsappSendModule = vi.hoisted(() => ({
-  sendVideoAndLinkToGroup: vi.fn(),
+  sendProductVideoToWhatsApp: vi.fn(async () => {}),
 }));
 
 vi.mock('@/lib/tikdrop/download', () => downloadModule);
@@ -79,7 +79,7 @@ describe('POST /api/video/download', () => {
     expect(mockUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { videoStatus: 'failed' } })
     );
-    expect(whatsappSendModule.sendVideoAndLinkToGroup).not.toHaveBeenCalled();
+    expect(whatsappSendModule.sendProductVideoToWhatsApp).not.toHaveBeenCalled();
   });
 
   it('sucesso → videoStatus=downloaded e envia para o WhatsApp', async () => {
@@ -88,20 +88,19 @@ describe('POST /api/video/download', () => {
       videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
       videoPath: 'C:\\projeto\\.videos\\abc.mp4',
     });
-    whatsappSendModule.sendVideoAndLinkToGroup.mockResolvedValue({ success: true });
+    whatsappSendModule.sendProductVideoToWhatsApp.mockResolvedValue(undefined);
 
     const res = await callDownload(baseProduct.id);
     const data = await res.json();
 
     expect(data.success).toBe(true);
     expect(data.product.videoStatus).toBe('downloaded');
-    expect(whatsappSendModule.sendVideoAndLinkToGroup).toHaveBeenCalledTimes(1);
-    expect(whatsappSendModule.sendVideoAndLinkToGroup).toHaveBeenCalledWith(
+    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledTimes(1);
+    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledWith(
       expect.objectContaining({
         id: baseProduct.id,
         title: baseProduct.title,
         productUrl: baseProduct.productUrl,
-        videoPath: 'C:\\projeto\\.videos\\abc.mp4',
       }),
       'C:\\projeto\\.videos\\abc.mp4'
     );
@@ -113,15 +112,31 @@ describe('POST /api/video/download', () => {
       videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
       videoPath: 'C:\\projeto\\.videos\\abc.mp4',
     });
-    whatsappSendModule.sendVideoAndLinkToGroup.mockResolvedValue({
-      success: false,
-      error: 'grupo não encontrado',
-    });
+    whatsappSendModule.sendProductVideoToWhatsApp.mockResolvedValue(undefined);
 
     const res = await callDownload(baseProduct.id);
     const data = await res.json();
 
     expect(data.success).toBe(true);
     expect(data.product.videoStatus).toBe('downloaded');
+    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledTimes(1);
+  });
+
+  it('sem videoPath no download → não chama o WhatsApp', async () => {
+    downloadModule.downloadTikTokVideo.mockResolvedValue({
+      success: true,
+      videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
+      videoPath: null,
+    });
+    whatsappSendModule.sendProductVideoToWhatsApp.mockResolvedValue(undefined);
+
+    const res = await callDownload(baseProduct.id);
+    const data = await res.json();
+
+    expect(data.success).toBe(true);
+    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledWith(
+      expect.objectContaining({ id: baseProduct.id }),
+      null
+    );
   });
 });

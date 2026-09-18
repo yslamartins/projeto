@@ -31,7 +31,10 @@ vi.mock('./client', () => ({
   })),
 }));
 
-import { sendVideoAndLinkToGroup } from './send';
+import {
+  sendProductVideoToWhatsApp,
+  sendVideoAndLinkToGroup,
+} from './send';
 import { getWhatsAppState, ensureWhatsAppSession } from './client';
 
 const fakeProduct: Product = {
@@ -52,14 +55,13 @@ const fakeProduct: Product = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.restoreAllMocks();
   mocks.setMockGroupChat({
     isGroup: true,
     name: SHOPEE_VIDEO_GROUP_NAME,
     id: { _serialized: '120363012345678901@g.us' },
   });
-  mocks.mockSendMessage.mockReset();
-  mocks.mockGetChats.mockReset();
   mocks.mockGetChats.mockResolvedValue([mocks.getMockGroupChat()]);
   vi.mocked(getWhatsAppState).mockReturnValue('connected');
 });
@@ -112,5 +114,20 @@ describe('sendVideoAndLinkToGroup', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('network error');
+  });
+});
+
+describe('sendProductVideoToWhatsApp', () => {
+  it('não envia quando não há videoPath', async () => {
+    await sendProductVideoToWhatsApp(fakeProduct, null);
+    expect(ensureWhatsAppSession).not.toHaveBeenCalled();
+    expect(mocks.mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('não propaga a falha do envio (best-effort)', async () => {
+    mocks.mockSendMessage.mockRejectedValueOnce(new Error('network error'));
+    await expect(sendProductVideoToWhatsApp(fakeProduct, '/tmp/video.mp4')).resolves.toBeUndefined();
+    expect(ensureWhatsAppSession).toHaveBeenCalledTimes(1);
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(1);
   });
 });
