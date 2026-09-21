@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 
 const PROFILE_FLAG = '--user-data-dir=';
+const SWEEP_CONFIRM_TIMEOUT_MS = 4000;
+const SWEEP_CONFIRM_INTERVAL_MS = 150;
 
 function normalizeKey(dir: string): string {
   return dir.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -84,5 +86,20 @@ export async function sweepStaleSessionChrome(
     return 0;
   }
   await Promise.all(pids.map((pid) => killer(pid).catch(() => {})));
+  // taskkill (spawn) fecha antes de o Chrome TERMINAR de morrer: o
+  // SingletonLock do perfil pode demorar alguns ms pra ser liberado.
+  // Se o retry subir o Chrome agora, vai receber 'already running' de novo.
+  // Aguarda a liberaÇ«Çœo REAL (re-lister atÇ¸ restar 0), com timeout p/
+  // nunca pendurar a sessÇœo se a morte demorar demais.
+  if (pids.length > 0) {
+    const deadline = Date.now() + SWEEP_CONFIRM_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      try {
+        const restantes = await lister(profileDir);
+        if (restantes.length === 0) break;
+      } catch { break; }
+      await new Promise((r) => setTimeout(r, SWEEP_CONFIRM_INTERVAL_MS));
+    }
+  }
   return pids.length;
 }
