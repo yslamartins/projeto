@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const testState = vi.hoisted(() => {
   const handlers = new Map<string, Array<(...args: any[]) => void>>();
@@ -56,6 +56,10 @@ vi.mock('qrcode', () => ({
     cb(null, 'QR-ASCII')
   ),
 }));
+vi.mock('./sweep', () => ({
+  sweepStaleSessionChrome: vi.fn(async () => 0),
+}));
+
 
 import {
   ensureWhatsAppSession,
@@ -83,20 +87,20 @@ beforeEach(() => {
 });
 
 describe('ensureWhatsAppSession', () => {
-  it('inicializa um cliente e retorna a mesma instância em chamadas seguintes', async () => {
+  it('inicializa um cliente e retorna a mesma instÃ¢ncia em chamadas seguintes', async () => {
     const client1 = await ensureWhatsAppSession();
     const client2 = await ensureWhatsAppSession();
     expect(client1).toBe(client2);
   });
 
-  it('roda o Chrome em modo oculto por padrão', async () => {
+  it('roda o Chrome em modo oculto por padrÃ£o', async () => {
     await ensureWhatsAppSession();
     expect(testState.getClientOptions()).toMatchObject({
       puppeteer: { headless: true },
     });
   });
 
-  it('abre o Chrome visível quando WHATSAPP_HEADLESS=false', async () => {
+  it('abre o Chrome visÃ­vel quando WHATSAPP_HEADLESS=false', async () => {
     const original = process.env.WHATSAPP_HEADLESS;
     process.env.WHATSAPP_HEADLESS = 'false';
     try {
@@ -113,7 +117,7 @@ describe('ensureWhatsAppSession', () => {
     }
   });
 
-  it('transita para disconnected quando a inicialização falha', async () => {
+  it('transita para disconnected quando a inicializaÃ§Ã£o falha', async () => {
     testState.setFailInitialize(true);
     await expect(ensureWhatsAppSession()).rejects.toThrow();
     expect(getWhatsAppState()).toBe('disconnected');
@@ -123,7 +127,7 @@ describe('ensureWhatsAppSession', () => {
     expect(client).toBeTruthy();
   });
 
-  it('tenta de novo quando a primeira inicialização falha de forma transitória', async () => {
+  it('tenta de novo quando a primeira inicializaÃ§Ã£o falha de forma transitÃ³ria', async () => {
     testState.setFailTimes(1);
     const client = await ensureWhatsAppSession();
     expect(client).toBeTruthy();
@@ -131,8 +135,8 @@ describe('ensureWhatsAppSession', () => {
   });
 });
 
-describe('eventos de conexão', () => {
-  it('qr → waiting_qr com data URL da imagem', () => {
+describe('eventos de conexÃ£o', () => {
+  it('qr â†’ waiting_qr com data URL da imagem', () => {
     const pending = requestWhatsAppQr().then((result) => result);
     return nextTick().then(() => {
       emitEvent('qr', 'RAW_QR_CODE');
@@ -146,7 +150,7 @@ describe('eventos de conexão', () => {
     });
   });
 
-  it('qr emite logs SSE informando que o QR está disponível', () => {
+  it('qr emite logs SSE informando que o QR estÃ¡ disponÃ­vel', () => {
     const emitSpy = vi.spyOn(scannerEvents, 'emit');
     const pending = requestWhatsAppQr();
     return nextTick().then(() => {
@@ -176,7 +180,7 @@ describe('eventos de conexão', () => {
     });
   });
 
-  it('authenticated → connecting, ready → connected', () => {
+  it('authenticated â†’ connecting, ready â†’ connected', () => {
     const pending = requestWhatsAppQr().then((result) => result);
     return nextTick()
       .then(() => {
@@ -202,7 +206,7 @@ describe('eventos de conexão', () => {
     expect(result.qr).toBeNull();
   });
 
-  it('disconnected volta para disconnected e libera a sessão para nova tentativa', async () => {
+  it('disconnected volta para disconnected e libera a sessÃ£o para nova tentativa', async () => {
     const first = await ensureWhatsAppSession();
     emitEvent('disconnected', 'LOGOUT');
     await nextTick();
@@ -224,7 +228,7 @@ describe('eventos de conexão', () => {
 });
 
 describe('requestWhatsAppQr', () => {
-  it('retorna qr null se o QR não chegar dentro do timeout', async () => {
+  it('retorna qr null se o QR nÃ£o chegar dentro do timeout', async () => {
     const result = await requestWhatsAppQr(50);
     expect(result.qr).toBeNull();
   });
