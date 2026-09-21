@@ -34,3 +34,6 @@ yarn-error.log*
 # OS Files
 .DS_Store
 Thumbs.db
+
+# artefato de build do TypeScript (recriado a cada tsc)
+*.tsbuildinfo
