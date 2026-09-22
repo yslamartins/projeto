@@ -63,14 +63,19 @@ async function listChromePidsForProfile(profileDir: string): Promise<number[]> {
   return pids;
 }
 
+// Diagnostico real (diag-taskkill2.txt): `taskkill /F /T` FALHA silenciosamente
+// neste ambiente — nao mata, saida vazia, $LASTEXITCODE vazio, processos seguem
+// vivos. So `Stop-Process -Force` derruba a arvore e libera o SingletonLock. O
+// sweep precisa derrubar DE VERDADE, senao o retry sobe e toma "already running".
 async function killChromeTree(pid: number): Promise<void> {
   await new Promise<void>((resolve) => {
-    const taskkill = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-      windowsHide: true,
-      stdio: 'ignore',
-    });
-    taskkill.on('error', () => resolve());
-    taskkill.on('close', () => resolve());
+    const ps = spawn(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', `Stop-Process -Id ${pid} -Force`],
+      { windowsHide: true, stdio: 'ignore' }
+    );
+    ps.on('error', () => resolve());
+    ps.on('close', () => resolve());
   });
 }
 
@@ -89,11 +94,10 @@ export async function sweepStaleSessionChrome(
     return 0;
   }
   await Promise.all(pids.map((pid) => killer(pid).catch(() => {})));
-  // taskkill (spawn) fecha antes de o Chrome TERMINAR de morrer: o
-  // SingletonLock do perfil pode demorar alguns ms pra ser liberado.
-  // Se o retry subir o Chrome agora, vai receber 'already running' de novo.
-  // Aguarda a liberacao REAL (re-lister ate restar 0), com timeout p/
-  // nunca pendurar a sessao se a morte demorar demais.
+  // O Stop-Process roda assincrono: o processo pode demorar alguns ms pra de
+  // fato morrer e liberar o SingletonLock. Se o retry subir o Chrome agora, vai
+  // receber 'already running' de novo. Aguarda a liberacao REAL (re-lister ate
+  // restar 0), com timeout p/ nunca pendurar a sessao se a morte demorar.
   if (pids.length > 0) {
     const deadline = Date.now() + SWEEP_CONFIRM_TIMEOUT_MS;
     while (Date.now() < deadline) {
@@ -105,19 +109,13 @@ export async function sweepStaleSessionChrome(
     }
   }
 
-  // Importante: o Puppeteer em Windows (BrowserLauncher.js:175) dispara o
-  // erro "already running" se o ARQUIVO `lockfile` EXISTIR no userDataDir —
-  // nao e o SingletonLock, e nao exige Chrome vivo. taskkill /F mata o
-  // processo mas deixa o `lockfile` (e os Singleton*) ORFAOS em disco; se
-  // nao removermos, o retry re-sobe e recebe o mesmo erro pra sempre.
+  // Importante: o Puppeteer em Windows (BrowserLauncher.js:175) dispara o erro
+  // "already running" se o ARQUIVO `lockfile` EXISTIR no userDataDir — nao o
+  // SingletonLock, e nao exige Chrome vivo. Stop-Process -Force mata o processo
+  // mas pode deixar o `lockfile` (e os Singleton*) ORFAOS em disco; se nao
+  // removermos, o retry re-sobe e recebe o mesmo erro de novo.
   // Sao so artefatos de lock (o Chrome recria no launch), nunca a sessao.
-  //
-  // Caso decisivo: quando o Chrome JA morreu sozinho (lister = 0) o
-  // `lockfile` pode ter ficado ORFAO de um kill/crash anterior — e o
-  // `if (pids.length > 0)` NAO entra (0), deixando o lockfile pra sempre.
-  // Por isso a remocao so roda se o perfil estiver LIVRE de processos
-  // (re-lister atual = 0), que cobre os dois casos: pos-kill E orfao.
-  const restantes = await lister(profileDir);
+  const restantes = pids.length > 0 ? await lister(profileDir) : [];
   const livre = restantes.length === 0;
   if (livre) {
     for (const name of LOCK_ARTIFACTS) {
