@@ -49,13 +49,6 @@ vi.mock('whatsapp-web.js', () => {
   return { Client: FakeClient, LocalAuth: class {} };
 });
 
-vi.mock('qrcode', () => ({
-  __esModule: true,
-  toDataURL: vi.fn(async (qr: string) => `data:image/png;base64,${qr}`),
-  toString: vi.fn((_qr: string, _options: unknown, cb: (err: Error | null, out: string) => void) =>
-    cb(null, 'QR-ASCII')
-  ),
-}));
 vi.mock('./sweep', () => ({
   sweepStaleSessionChrome: vi.fn(async () => 0),
 }));
@@ -64,7 +57,6 @@ vi.mock('./sweep', () => ({
 import {
   ensureWhatsAppSession,
   getWhatsAppState,
-  requestWhatsAppQr,
   resetWhatsAppSessionForTests,
 } from './client';
 import { scannerEvents } from '@/lib/scanner/events';
@@ -84,6 +76,7 @@ beforeEach(() => {
   resetWhatsAppSessionForTests();
   testState.handlers.clear();
   testState.setFailTimes(0);
+  delete process.env.WHATSAPP_HEADLESS;
 });
 
 describe('ensureWhatsAppSession', () => {
@@ -93,28 +86,19 @@ describe('ensureWhatsAppSession', () => {
     expect(client1).toBe(client2);
   });
 
-  it('roda o Chrome em modo oculto por padrÃ£o', async () => {
+  it('abre o Chrome visÃ­vel por padrÃ£o', async () => {
+    await ensureWhatsAppSession();
+    expect(testState.getClientOptions()).toMatchObject({
+      puppeteer: { headless: false },
+    });
+  });
+
+  it('oculta o Chrome quando WHATSAPP_HEADLESS=true', async () => {
+    process.env.WHATSAPP_HEADLESS = 'true';
     await ensureWhatsAppSession();
     expect(testState.getClientOptions()).toMatchObject({
       puppeteer: { headless: true },
     });
-  });
-
-  it('abre o Chrome visÃ­vel quando WHATSAPP_HEADLESS=false', async () => {
-    const original = process.env.WHATSAPP_HEADLESS;
-    process.env.WHATSAPP_HEADLESS = 'false';
-    try {
-      await ensureWhatsAppSession();
-      expect(testState.getClientOptions()).toMatchObject({
-        puppeteer: { headless: false },
-      });
-    } finally {
-      if (original === undefined) {
-        delete process.env.WHATSAPP_HEADLESS;
-      } else {
-        process.env.WHATSAPP_HEADLESS = original;
-      }
-    }
   });
 
   it('transita para disconnected quando a inicializaÃ§Ã£o falha', async () => {
@@ -136,74 +120,41 @@ describe('ensureWhatsAppSession', () => {
 });
 
 describe('eventos de conexÃ£o', () => {
-  it('qr â†’ waiting_qr com data URL da imagem', () => {
-    const pending = requestWhatsAppQr().then((result) => result);
-    return nextTick().then(() => {
-      emitEvent('qr', 'RAW_QR_CODE');
-      return pending.then((result) => {
-        expect(getWhatsAppState()).toBe('waiting_qr');
-        expect(result).toEqual({
-          state: 'waiting_qr',
-          qr: 'data:image/png;base64,RAW_QR_CODE',
-        });
-      });
-    });
-  });
-
-  it('qr emite logs SSE informando que o QR estÃ¡ disponÃ­vel', () => {
+  it('qr → connecting e emite log SSE guiando para a janela do navegador', async () => {
     const emitSpy = vi.spyOn(scannerEvents, 'emit');
-    const pending = requestWhatsAppQr();
-    return nextTick().then(() => {
-      emitEvent('qr', 'RAW_QR_CODE');
-      return pending.then(() => {
-        const calls = emitSpy.mock.calls;
-        expect(calls.some(([type, message]) => type === 'step' && message.includes('escaneie'))).toBe(
-          true
-        );
-        expect(calls.some(([type, , data]) => type === 'info' && data?.qrAvailable === true)).toBe(
-          true
-        );
-      });
-    });
-  });
-
-  it('ready emite log SSE de sucesso', () => {
-    const emitSpy = vi.spyOn(scannerEvents, 'emit');
-    const pending = requestWhatsAppQr();
-    return nextTick().then(() => {
-      emitEvent('ready');
-      return pending.then(() => {
-        expect(
-          emitSpy.mock.calls.some(([type, message]) => type === 'success' && message.includes('conectado'))
-        ).toBe(true);
-      });
-    });
-  });
-
-  it('authenticated â†’ connecting, ready â†’ connected', () => {
-    const pending = requestWhatsAppQr().then((result) => result);
-    return nextTick()
-      .then(() => {
-        emitEvent('qr', 'RAW_QR_CODE');
-        expect(getWhatsAppState()).toBe('waiting_qr');
-        emitEvent('authenticated');
-        expect(getWhatsAppState()).toBe('connecting');
-        emitEvent('ready');
-        expect(getWhatsAppState()).toBe('connected');
-        return pending;
-      })
-      .then((result) => {
-        expect(result).toEqual({ state: 'connected', qr: null });
-      });
-  });
-
-  it('ready limpa o QR atual', async () => {
-    const pending = requestWhatsAppQr();
+    const pending = ensureWhatsAppSession();
     await nextTick();
     emitEvent('qr', 'RAW_QR_CODE');
+    expect(getWhatsAppState()).toBe('connecting');
+    await pending;
+
+    const calls = emitSpy.mock.calls;
+    expect(
+      calls.some(([type, message]) => type === 'step' && message.includes('escaneie o QR code na janela'))
+    ).toBe(true);
+  });
+
+  it('ready emite log SSE de sucesso', async () => {
+    const emitSpy = vi.spyOn(scannerEvents, 'emit');
+    const pending = ensureWhatsAppSession();
+    await nextTick();
     emitEvent('ready');
-    const result = await pending;
-    expect(result.qr).toBeNull();
+    await pending;
+    expect(
+      emitSpy.mock.calls.some(([type, message]) => type === 'success' && message.includes('conectado'))
+    ).toBe(true);
+  });
+
+  it('qr/authenticated → connecting, ready → connected', async () => {
+    const pending = ensureWhatsAppSession();
+    await nextTick();
+    emitEvent('qr', 'RAW_QR_CODE');
+    expect(getWhatsAppState()).toBe('connecting');
+    emitEvent('authenticated');
+    expect(getWhatsAppState()).toBe('connecting');
+    emitEvent('ready');
+    expect(getWhatsAppState()).toBe('connected');
+    await pending;
   });
 
   it('disconnected volta para disconnected e libera a sessÃ£o para nova tentativa', async () => {
@@ -224,12 +175,5 @@ describe('eventos de conexÃ£o', () => {
 
     const second = await ensureWhatsAppSession();
     expect(second).not.toBe(first);
-  });
-});
-
-describe('requestWhatsAppQr', () => {
-  it('retorna qr null se o QR nÃ£o chegar dentro do timeout', async () => {
-    const result = await requestWhatsAppQr(50);
-    expect(result.qr).toBeNull();
   });
 });

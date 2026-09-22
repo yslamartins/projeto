@@ -30,11 +30,8 @@ export async function connectWhatsAppOrLog(
     await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL_INTERVAL_MS));
   }
 
-  const state = getWhatsAppState();
   const message =
-    state === 'waiting_qr'
-      ? 'WhatsApp aguardando QR code. Abra /api/whatsapp/qr para vincular o WhatsApp.'
-      : 'WhatsApp não está conectado. Abra /api/whatsapp/qr para vincular o WhatsApp.';
+    'WhatsApp não está conectado. Abra a janela do navegador do WhatsApp e escaneie o QR code para vincular a sessão.';
   scannerEvents.emit('warn', `Envio ao WhatsApp ignorado: ${message}`);
   return null;
 }

@@ -19,9 +19,9 @@ describe('GET /api/whatsapp/status', () => {
     expect(await response.json()).toEqual({ state: 'connected' });
   });
 
-  it('reflete o estado aguardando QR', async () => {
-    vi.mocked(getWhatsAppState).mockReturnValue('waiting_qr');
+  it('reflete o estado conectando (QR exibido na janela)', async () => {
+    vi.mocked(getWhatsAppState).mockReturnValue('connecting');
     const response = await GET();
-    expect(await response.json()).toEqual({ state: 'waiting_qr' });
+    expect(await response.json()).toEqual({ state: 'connecting' });
   });
 });
