@@ -3,8 +3,6 @@ import { Readable } from 'stream';
 import type { ReadableStream as WebReadableStream } from 'stream/web';
 import { pipeline } from 'stream/promises';
 
-const DEFAULT_TIKDROP_API_URL = 'https://tikdrop-k8re.onrender.com';
-
 export interface TikDropMedia {
   videoUrl: string;
   quality: string;
@@ -43,7 +41,12 @@ export type TikDropDownloadResult =
 
 export function getTikDropApiUrl(): string {
   const fromEnv = process.env.TIKDROP_API_URL?.trim();
-  return fromEnv ? fromEnv.replace(/\/+$/, '') : DEFAULT_TIKDROP_API_URL;
+  if (!fromEnv) {
+    throw new Error(
+      'TIKDROP_API_URL não definida no .env. Copie .env.example para .env e ajuste o valor.'
+    );
+  }
+  return fromEnv.replace(/\/+$/, '');
 }
 
 function parseErrorCode(body: string): TikDropErrorCode {

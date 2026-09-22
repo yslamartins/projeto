@@ -38,9 +38,9 @@ describe('getTikDropApiUrl', () => {
     }
   });
 
-  it('usa o default apontando para o serviço em onrender', () => {
+  it('lança erro quando TIKDROP_API_URL não está definida', () => {
     delete process.env.TIKDROP_API_URL;
-    expect(getTikDropApiUrl()).toBe('https://tikdrop-k8re.onrender.com');
+    expect(() => getTikDropApiUrl()).toThrow(/TIKDROP_API_URL/);
   });
 
   it('lê a base de TIKDROP_API_URL e remove barra final', () => {
@@ -51,9 +51,19 @@ describe('getTikDropApiUrl', () => {
 
 describe('resolveTikTokVideo', () => {
   const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.TIKDROP_API_URL;
+
+  beforeEach(() => {
+    process.env.TIKDROP_API_URL = 'https://tikdrop-k8re.onrender.com';
+  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) {
+      delete process.env.TIKDROP_API_URL;
+    } else {
+      process.env.TIKDROP_API_URL = originalEnv;
+    }
   });
 
   it('responde com sucesso e devolve o metadado tipado', async () => {
@@ -132,15 +142,22 @@ describe('resolveTikTokVideo', () => {
 
 describe('downloadTikTokVideoMp4', () => {
   const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.TIKDROP_API_URL;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tikdrop-'));
+    process.env.TIKDROP_API_URL = 'https://tikdrop-k8re.onrender.com';
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (originalEnv === undefined) {
+      delete process.env.TIKDROP_API_URL;
+    } else {
+      process.env.TIKDROP_API_URL = originalEnv;
+    }
   });
 
   it('baixa o MP4 e reporta o tamanho gravado', async () => {
