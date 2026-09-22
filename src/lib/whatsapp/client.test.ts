@@ -119,7 +119,7 @@ describe('ensureWhatsAppSession', () => {
   });
 });
 
-describe('eventos de conexÃ£o', () => {
+describe('eventos de conexão', () => {
   it('qr → connecting e emite log SSE guiando para a janela do navegador', async () => {
     const emitSpy = vi.spyOn(scannerEvents, 'emit');
     const pending = ensureWhatsAppSession();

@@ -94,8 +94,8 @@ async function initializeClient(): Promise<Client> {
     scannerEvents.emit(
       'step',
       attempt === 1
-        ? 'WhatsApp: iniciando sessÃ£o (WhatsApp Web)...'
-        : `WhatsApp: tentando iniciar a sessÃ£o novamente (tentativa ${attempt}/${MAX_INIT_ATTEMPTS})...`
+        ? 'WhatsApp: iniciando sessão (WhatsApp Web)...'
+        : `WhatsApp: tentando iniciar a sessão novamente (tentativa ${attempt}/${MAX_INIT_ATTEMPTS})...`
     );
 
     if (runtime.teardown) {
@@ -103,15 +103,15 @@ async function initializeClient(): Promise<Client> {
       runtime.teardown = null;
     }
 
-    // A sessÃ£o salva Ã© retomada reabrindo o MESMO perfil do Chrome
+    // A sessão salva é retomada reabrindo o MESMO perfil do Chrome
     // (`--user-data-dir=session`). Se uma run anterior deixou um Chrome vivo
-    // segurando esse perfil â€” crash, Ctrl+C no processo errado, teardown que
+    // segurando esse perfil — crash, Ctrl+C no processo errado, teardown que
     // nÃ£o derrubou a Ã¡rvore â€” o Puppeteer recusa com "already running" e o
     // retry quebraria pra sempre. Derruba qualquer Chrome que aponte pro nosso
     // perfil ANTES de cada tentativa (idempotente: nÃ£o existe = nada a fazer).
     const swept = await sweepStaleSessionChrome(path.resolve(SESSION_DIR, 'session'));
     if (swept > 0) {
-      scannerEvents.emit('warn', `WhatsApp: encerrei ${swept} Chrome(s) preso(s) no perfil da sessÃ£o.`);
+      scannerEvents.emit('warn', `WhatsApp: encerrei ${swept} Chrome(s) preso(s) no perfil da sessão.`);
     }
 
     const client = buildClient();
@@ -124,7 +124,7 @@ async function initializeClient(): Promise<Client> {
       lastError = error;
       scannerEvents.emit(
         'warn',
-        `WhatsApp: falha ao iniciar a sessÃ£o (tentativa ${attempt}/${MAX_INIT_ATTEMPTS}).`
+        `WhatsApp: falha ao iniciar a sessão (tentativa ${attempt}/${MAX_INIT_ATTEMPTS}).`
       );
       markDisconnected();
       scheduleTeardown(client);

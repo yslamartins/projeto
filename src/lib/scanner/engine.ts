@@ -206,16 +206,22 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       try {
         await page.goto('https://shopee.com.br', {
           waitUntil: 'domcontentloaded',
-          timeout: 35000,
+          timeout: 80000,
         });
 
-        // Comportamento humano: posiciona o cursor, "pensa" antes de agir e
-        // rola lentamente para carregar a seção de Buscas em alta.
+        // Internet lenta: dá bastante tempo para React, imagens,
+        // componentes dinâmicos e conteúdo da Shopee carregarem.
+        await humanDelay(5000, 8000);
+
         await resetCursor(page);
-        await humanDelay(1500, 3000);
-        await humanScroll(page, 1200);
-        await humanDelay(600, 1400);
+        await humanDelay(2500, 4500);
+
+        // Rola devagar para dar tempo de carregar conteúdo abaixo.
+        await humanScroll(page, 1000);
+        await humanDelay(3000, 5000);
+
         await humanMouseIdle(page);
+        await humanDelay(2000, 3500);
 
         const extracted = await page.evaluate(() => {
           const terms: string[] = [];
