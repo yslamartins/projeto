@@ -15,11 +15,23 @@ interface WhatsAppRuntime {
   teardown: Promise<void> | null;
 }
 
-const runtime: WhatsAppRuntime = {
-  state: 'disconnected',
-  clientPromise: null,
-  teardown: null,
+// Persiste o runtime no globalThis para sobreviver ao hot-reload do dev-server
+// (mesmo padrão do scannerEvents): HMR reavalia o módulo, mas o estado da
+// sessão do WhatsApp precisa continuar sendo o do client autenticado.
+const globalForWhatsApp = globalThis as unknown as {
+  __whatsAppRuntime: WhatsAppRuntime | undefined;
 };
+
+const runtime: WhatsAppRuntime =
+  globalForWhatsApp.__whatsAppRuntime ?? {
+    state: 'disconnected',
+    clientPromise: null,
+    teardown: null,
+  };
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForWhatsApp.__whatsAppRuntime = runtime;
+}
 
 function markDisconnected(): void {
   runtime.state = 'disconnected';
