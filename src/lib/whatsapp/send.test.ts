@@ -5,15 +5,17 @@ import { SHOPEE_VIDEO_GROUP_NAME } from './send';
 
 const mocks = vi.hoisted(() => {
   const mockSendMessage = vi.fn<(...args: any[]) => Promise<any>>(async () => {});
-  const mockGetChats = vi.fn<() => Promise<any[]>>(async () => []);
-  let mockGroupChat: any = null;
+  const mockFindGroupId = vi.fn<(...args: any[]) => Promise<string | null>>(
+    async () => null
+  );
   return {
     mockSendMessage,
-    mockGetChats,
-    setMockGroupChat: (chat: any) => {
-      mockGroupChat = chat;
+    mockFindGroupId,
+    setMockGroupIds: (ids: (string | null)[]) => {
+      mockFindGroupId.mockImplementation(async () =>
+        ids.length ? ids[0] : null
+      );
     },
-    getMockGroupChat: () => mockGroupChat,
   };
 });
 
@@ -26,7 +28,7 @@ vi.mock('whatsapp-web.js', () => ({
 vi.mock('./client', () => ({
   getWhatsAppState: vi.fn(),
   ensureWhatsAppSession: vi.fn(async () => ({
-    getChats: mocks.mockGetChats,
+    pupPage: { evaluate: mocks.mockFindGroupId },
     sendMessage: mocks.mockSendMessage,
   })),
 }));
@@ -58,12 +60,7 @@ const fakeProduct: Product = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
-  mocks.setMockGroupChat({
-    isGroup: true,
-    name: SHOPEE_VIDEO_GROUP_NAME,
-    id: { _serialized: '120363012345678901@g.us' },
-  });
-  mocks.mockGetChats.mockResolvedValue([mocks.getMockGroupChat()]);
+  mocks.setMockGroupIds(['120363012345678901@g.us']);
   vi.mocked(getWhatsAppState).mockReturnValue('connected');
 });
 
@@ -90,9 +87,7 @@ describe('sendVideoAndLinkToGroup', () => {
   });
 
   it('retorna erro quando o grupo não é encontrado', async () => {
-    mocks.mockGetChats.mockResolvedValue([
-      { isGroup: true, name: 'Outro Grupo', id: { _serialized: 'x' } },
-    ]);
+    mocks.setMockGroupIds([]);
     const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4');
 
     expect(result.success).toBe(false);

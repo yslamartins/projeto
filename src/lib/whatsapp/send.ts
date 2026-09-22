@@ -36,6 +36,35 @@ export async function connectWhatsAppOrLog(
   return null;
 }
 
+async function findGroupIdByName(
+  client: Client,
+  groupName: string
+): Promise<string | null> {
+  if (!client.pupPage) {
+    return null;
+  }
+  return client.pupPage.evaluate((name) => {
+    const requireModule = (moduleName: string) =>
+      (window as unknown as { require: (name: string) => unknown }).require(
+        moduleName
+      );
+    type RawChat = {
+      id: { _serialized: string };
+      name?: string;
+      groupMetadata?: unknown;
+    };
+    const chats = (
+      requireModule('WAWebCollections') as {
+        Chat: { getModelsArray: () => RawChat[] };
+      }
+    ).Chat.getModelsArray();
+    const group = chats.find(
+      (chat) => chat.groupMetadata && chat.name === name
+    );
+    return group ? group.id._serialized : null;
+  }, groupName);
+}
+
 export async function sendVideoAndLinkToGroup(
   product: Pick<Product, 'title' | 'productUrl'>,
   videoPath: string,
@@ -48,26 +77,23 @@ export async function sendVideoAndLinkToGroup(
     }
 
     scannerEvents.emit('step', `WhatsApp: procurando o grupo "${SHOPEE_VIDEO_GROUP_NAME}"...`);
-    const chats = await client.getChats();
-    const group = chats.find(
-      (chat) => chat.isGroup && chat.name === SHOPEE_VIDEO_GROUP_NAME
-    );
+    const groupId = await findGroupIdByName(client, SHOPEE_VIDEO_GROUP_NAME);
 
-    if (!group) {
+    if (!groupId) {
       const message = `O grupo "${SHOPEE_VIDEO_GROUP_NAME}" não foi encontrado no WhatsApp.`;
       scannerEvents.emit('warn', `Envio ao WhatsApp ignorado: ${message}`);
       return { success: false, error: message };
     }
 
     const caption = `${product.title}\n${product.productUrl}`;
-    scannerEvents.emit('step', `WhatsApp: enviando vídeo e link para "${group.name}"...`);
+    scannerEvents.emit('step', `WhatsApp: enviando vídeo e link para "${SHOPEE_VIDEO_GROUP_NAME}"...`);
     await client.sendMessage(
-      group.id._serialized,
+      groupId,
       MessageMedia.fromFilePath(videoPath),
       { caption }
     );
 
-    scannerEvents.emit('success', `WhatsApp: vídeo e link enviados para "${group.name}".`);
+    scannerEvents.emit('success', `WhatsApp: vídeo e link enviados para "${SHOPEE_VIDEO_GROUP_NAME}".`);
     return { success: true };
   } catch (error: unknown) {
     const message =
