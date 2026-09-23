@@ -29,7 +29,11 @@ from urllib.parse import quote as _urlencode
 from shopee_parser import (
     BASE_URL,
     MAX_TERMS_PER_SCAN,
+    API_SEARCH_EVALUATE,
+    build_api_sales_map,
     complete_with_fallback,
+    enrich_cards_with_api_sales,
+    map_api_item_to_raw_card,
     parse_search_html,
     parse_trending_terms,
 )
@@ -306,11 +310,18 @@ def action_terms(headful: bool) -> dict[str, Any]:
 
 
 def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[str, Any]:
-    """Coleta RawCardData[] da busca ordenada por 'Mais recente' (engine linhas 310-445)."""
+    """Coleta RawCardData[] da busca ordenada por 'Mais recente' (engine linhas 310-498).
+
+    Enriquece as vendas via API interna (/api/v4/search/search_items) quando o DOM
+    não as exibe; erro 90309999 vira a flag `gated` no resultado.
+    """
     search_url = f"{BASE_URL}/search?keyword={_urlencode(term)}&sortBy=ctime"
     emit_log("step", f'[search] Pesquisando "{term}" ordenado por "Mais recente"...')
 
-    def humanize(page: Any) -> None:
+    api_box: dict[str, Any] = {}
+
+    def page_work(page: Any) -> None:
+        # Humanização pós-navegação (delay -> cursor -> scroll -> mouse idle).
         try:
             human_delay(1200, 2400)
             reset_cursor(page)
@@ -322,6 +333,13 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
         except Exception as exc:  # noqa: BLE001
             emit_log("info", f"[search] Humanização interrompida: {type(exc).__name__}")
 
+        # Contagem de vendas pela API interna (mesma origem/cookies da sessão).
+        try:
+            api_box["result"] = page.evaluate(API_SEARCH_EVALUATE, {"term": term, "limit": 30})
+        except Exception as exc:  # noqa: BLE001
+            api_box["error"] = str(exc)
+            emit_log("warn", f"[search] Falha ao consultar a API interna de vendas: {exc}")
+
     def do_fetch(session) -> Any:
         return session.fetch(
             search_url,
@@ -329,7 +347,7 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
             wait=2000,
             load_dom=True,
             google_search=False,
-            page_action=humanize,
+            page_action=page_work,
         )
 
     with open_session("shopee", headful) as session:
@@ -340,8 +358,7 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
 
         cards: list[dict[str, str]] = []
         if block is None:
-            html = _to_str(response.body) or ""
-            cards = parse_search_html(html)
+            cards = parse_search_html(_to_str(response.body) or "")
 
             # DOM sem cards mas sem gate: recarrega uma vez, como o engine (linhas 336-353).
             if not cards:
@@ -351,6 +368,52 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
                 block = shopee_block_kind(final_url, response.text or "")
                 if block is None:
                     cards = parse_search_html(_to_str(response.body) or "")
+
+        # Enriquecimento/fallback pela API interna (engine linhas 447-497).
+        api = api_box.get("result") or {"gated": False, "items": []}
+        gated = bool(api.get("gated"))
+        if block is None and "error" not in api_box:
+            if gated:
+                # Gate anti-bot na API. Se nem o DOM voltou, aborta; senão avisa.
+                if not cards:
+                    emit_log("error", "[search] API de vendas bloqueada (gate 90309999); sem cards no DOM.")
+                    return {
+                        "ok": False,
+                        "term": term,
+                        "url": final_url,
+                        "block": "security",
+                        "gated": True,
+                        "cards": [],
+                        "count": 0,
+                    }
+                emit_log(
+                    "warn",
+                    f'[search] API de vendas bloqueada (gate 90309999) para "{term}"; '
+                    "usando apenas o que aparece na página.",
+                )
+            else:
+                sales_map = build_api_sales_map(api.get("items", []))
+                if not cards:
+                    emit_log(
+                        "info",
+                        f'[search] DOM de "{term}" não retornou cards; usando o endpoint interno...',
+                    )
+                    for item in api.get("items", []):
+                        if len(cards) >= 30:
+                            break
+                        mapped = map_api_item_to_raw_card(item)
+                        if mapped:
+                            cards.append(mapped)
+                    emit_log("info", f'[search] {len(cards)} produtos obtidos via API interna.')
+                elif sales_map:
+                    before = len(cards)
+                    cards = enrich_cards_with_api_sales(cards, sales_map)
+                    counted = sum(1 for c in cards if c["rawSalesText"])
+                    emit_log(
+                        "info",
+                        f'[search] Contagem de vendas aplicada: {counted}/{before} '
+                        f'produtos com contador real da API para "{term}".',
+                    )
 
         if save_fixture:
             fixture = Path(__file__).resolve().parent / "tests" / "fixtures"
@@ -362,6 +425,8 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
 
         if block:
             emit_log("warn", f"[search] Gate detectado em shopee: {block}")
+        elif gated and not cards:
+            pass  # já retornou acima
         else:
             emit_log("success", f'[search] "{term}": {len(cards)} card(s) extraído(s).')
 
@@ -370,6 +435,7 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
             "term": term,
             "url": final_url,
             "block": block,
+            "gated": gated,
             "cards": cards,
             "count": len(cards),
         }

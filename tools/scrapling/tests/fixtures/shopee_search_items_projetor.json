@@ -1,0 +1,78 @@
+{
+  "term": "projetor",
+  "gated": false,
+  "items": [
+    {
+      "id": "1114645438.46900938754",
+      "item_basic": {
+        "id": "1114645438.46900938754",
+        "itemid": 46900938754,
+        "shopid": 1114645438,
+        "name": "BETTDOW  AC1075 720P 4K Ultra-Portable Mobile Projector 210 ANSI Android 11 180° Free Angle Bluetooth 5.2",
+        "price_max": 25080000,
+        "image": "sg-11134201-821ei-mgqeccebd72g53",
+        "historical_sold": 2000
+      }
+    },
+    {
+      "id": "1114645438.29145287066",
+      "item_basic": {
+        "id": "1114645438.29145287066",
+        "itemid": 29145287066,
+        "shopid": 1114645438,
+        "name": "O projetor BETTDOW AC1085 GTV é Android TV Full HD 2K, com calibração automática, Wi-Fi duplo e diversas funcionalidades",
+        "price_max": 44460000,
+        "image": "sg-11134201-8258l-mqlld4dtfcwcf9",
+        "historical_sold": 42
+      }
+    },
+    {
+      "id": "1114645438.55264908296",
+      "item_basic": {
+        "id": "1114645438.55264908296",
+        "itemid": 55264908296,
+        "shopid": 1114645438,
+        "name": "BETTDOW 2.1-inch Proyektor 160ANSI Brightness Type-C Interface Dual Band Wi-Fi Supports Wireless Screen Projection",
+        "price_max": 28310000,
+        "image": "sg-11134201-8258q-mr5qmao3ey9w37",
+        "historical_sold": 43
+      }
+    },
+    {
+      "id": "1082132739.57918036542",
+      "item_basic": {
+        "id": "1082132739.57918036542",
+        "itemid": 57918036542,
+        "shopid": 1082132739,
+        "name": "MagCubic Projetor HY300 Pro+ 4K 8000L Android 14 WiFi 6",
+        "price_max": 54000000,
+        "image": "br-11134275-820lp-mt8fm1c4sg0000",
+        "historical_sold": 0
+      }
+    },
+    {
+      "id": "1082132739.52768027885",
+      "item_basic": {
+        "id": "1082132739.52768027885",
+        "itemid": 52768027885,
+        "shopid": 1082132739,
+        "name": "MagCubic Projetor HY300 Pro 4K Android 14 WiFi 6 BT 5.4",
+        "price_max": 47000000,
+        "image": "br-11134275-820mg-mt8fm12ur474e1",
+        "historical_sold": 0
+      }
+    },
+    {
+      "id": "1082132739.52768027842",
+      "item_basic": {
+        "id": "1082132739.52768027842",
+        "itemid": 52768027842,
+        "shopid": 1082132739,
+        "name": "MagCubic Miniprojetor HY310 4K1080P Foco Auto Android 14",
+        "price_max": 84900000,
+        "image": "br-11134275-820lu-mt8fm1c9gzcybe",
+        "historical_sold": 0
+      }
+    }
+  ]
+}

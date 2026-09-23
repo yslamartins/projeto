@@ -239,3 +239,114 @@ def complete_with_fallback(terms: list[str], limit: int = MAX_TERMS_PER_SCAN) ->
         if len(terms) >= limit:
             break
     return terms[:limit]
+
+
+# --- Enriquecimento pela API interna (/api/v4/search/search_items) -------------
+# Portado de src/lib/scanner/api-search.ts. A chamada em si roda dentro da página
+# (page.evaluate) com os cookies da sessão; aqui ficam as transformações puras.
+
+SHOPEE_ANTI_BOT_ERROR = "90309999"
+
+# Mesma chamada do engine: fetch na mesma origem + header x-api-source: pc.
+API_SEARCH_EVALUATE = """async ({ term, limit }) => {
+  const qs = new URLSearchParams({
+    by: 'relevancy',
+    keyword: term,
+    limit: String(limit),
+    newest: '0',
+    order: 'desc',
+    page_type: 'search',
+    scenario: 'PAGE_GLOBAL_SEARCH',
+    version: '2',
+  });
+  const res = await fetch(`/api/v4/search/search_items?${qs.toString()}`, {
+    headers: { 'x-api-source': 'pc' },
+  });
+  const json = await res.json().catch(() => null);
+  if (json && String(json?.error) === '90309999') {
+    return { gated: true, items: [] };
+  }
+  if (Array.isArray(json?.data)) {
+    return { gated: false, items: json.data };
+  }
+  return { gated: false, items: Array.isArray(json?.data?.items) ? json.data.items : [] };
+};"""
+
+
+def is_gated_api_payload(json: Any) -> bool:
+    return bool(json) and str(json.get("error")) == SHOPEE_ANTI_BOT_ERROR
+
+
+def build_api_sales_map(items: list[dict]) -> dict[str, int]:
+    """Mapa "shopid.itemid" -> vendas (historical_sold), como o engine."""
+    mapping: dict[str, int] = {}
+    for item in items:
+        basic = item.get("item_basic") or item
+        itemid = basic.get("itemid") or item.get("itemid")
+        shopid = basic.get("shopid") or item.get("shopid")
+        sold = int(basic.get("historical_sold", basic.get("sold", 0)) or 0)
+        if itemid and shopid and sold > 0:
+            mapping[f"{shopid}.{itemid}"] = sold
+    return mapping
+
+
+def enrich_cards_with_api_sales(cards: list[dict[str, str]], sales_map: dict[str, int]) -> list[dict[str, str]]:
+    """Junta a contagem de vendas aos cards pelo id "<shopid>.<itemid>", quando o DOM não traz."""
+    from urllib.parse import urlparse, parse_qs
+
+    enriched: list[dict[str, str]] = []
+    for card in cards:
+        if card.get("rawSalesText"):
+            enriched.append(card)
+            continue
+        href = card.get("rawHref", "")
+        product_id = extract_shopee_product_id(href)
+        sold = sales_map.get(product_id) if product_id else None
+        if sold:
+            card = {**card, "rawSalesText": f"{sold} vendidos"}
+        enriched.append(card)
+    return enriched
+
+
+def map_api_item_to_raw_card(item: dict) -> dict[str, str] | None:
+    """Converte um item da API no formato RawCardData (engine mapApiItemToRawCard)."""
+    basic = item.get("item_basic") or item
+    itemid = basic.get("itemid") or item.get("itemid")
+    shopid = basic.get("shopid") or item.get("shopid")
+    name = basic.get("name")
+    price_max = basic.get("price_max", basic.get("price", 0)) or 0
+    sold = basic.get("historical_sold", basic.get("sold", 0)) or 0
+    if not itemid or not shopid or not name:
+        return None
+    price_in_reals = int(price_max) / 100000 if price_max else 0
+    raw_price = ""
+    if price_in_reals > 0:
+        raw_price = f"R$ {price_in_reals:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    image = basic.get("image")
+    return {
+        "rawHref": f"https://shopee.com.br/product/{shopid}/{itemid}",
+        "rawTitle": str(name),
+        "rawPrice": raw_price,
+        "rawSalesText": f"{sold} vendidos" if sold else "",
+        "rawImageUrl": f"https://down-br.img.susercontent.com/file/{image}" if image else "",
+    }
+
+
+def extract_shopee_product_id(url: str) -> str:
+    """Mesma regra do engine: -i.<s>.<i>, /product/<s>/<i> e ?shopid=&itemid=."""
+    from urllib.parse import urlparse, parse_qs
+
+    clean = url.split("?")[0]
+    m = re.search(r"-i\.(\d+)\.(\d+)", clean)
+    if m:
+        return f"{m.group(1)}.{m.group(2)}"
+    m = re.search(r"/product/(\d+)/(\d+)", clean)
+    if m:
+        return f"{m.group(1)}.{m.group(2)}"
+    parsed = urlparse(url if url.startswith("http") else BASE_URL + url)
+    qs = parse_qs(parsed.query)
+    shopid = qs.get("shopid", [""])[0]
+    itemid = qs.get("itemid", [""])[0]
+    if shopid.isdigit() and itemid.isdigit():
+        return f"{shopid}.{itemid}"
+    return ""

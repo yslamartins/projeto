@@ -1,6 +1,7 @@
 """Testes offline do parser da Shopee — rodam sem rede/navegador sobre fixtures reais."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -9,8 +10,13 @@ import pytest
 from shopee_parser import (
     MAX_TERMS_PER_SCAN,
     REAL_SHOPEE_TRENDING_TERMS,
+    build_api_sales_map,
     complete_with_fallback,
+    enrich_cards_with_api_sales,
+    extract_shopee_product_id,
+    is_gated_api_payload,
     is_product_href,
+    map_api_item_to_raw_card,
     parse_search_html,
     parse_trending_terms,
 )
@@ -19,6 +25,7 @@ from collect import shopee_block_kind, tiktok_block_kind
 FIXTURES = Path(__file__).parent / "fixtures"
 
 SEARCH_HTML = (FIXTURES / "shopee-search-projetor.html").read_text(encoding="utf-8", errors="replace")
+API_JSON = json.loads((FIXTURES / "shopee_search_items_projetor.json").read_text(encoding="utf-8"))
 
 
 def test_parse_search_html_returns_up_to_30_cards():
@@ -104,3 +111,78 @@ def test_tiktok_block_kind_detection():
     assert tiktok_block_kind("https://www.tiktok.com/login?x=1", "") == "login"
     assert tiktok_block_kind("https://www.tiktok.com/", "Log in to TikTok") == "login"
     assert tiktok_block_kind("https://www.tiktok.com/", "vídeos") is None
+
+
+# --- Enriquecimento / fallback pela API interna ---------------------------------
+
+
+def test_build_api_sales_map_uses_historical_sold():
+    items = API_JSON["items"]
+    mapping = build_api_sales_map(items)
+    assert len(mapping) >= 3
+    assert mapping["1114645438.46900938754"] == 2000
+    assert mapping["1114645438.29145287066"] == 42
+    for item in items:
+        basic = item["item_basic"]
+        pid = f"{basic['shopid']}.{basic['itemid']}"
+        sold = basic["historical_sold"]
+        if sold > 0:
+            assert mapping[pid] == sold
+        else:
+            assert pid not in mapping
+    # zero/ausente não entra no mapa
+    assert build_api_sales_map([{"item_basic": {"itemid": 1, "shopid": 2, "historical_sold": 0}}]) == {}
+
+
+def test_is_gated_api_payload():
+    assert is_gated_api_payload({"error": "90309999", "data": []}) is True
+    assert is_gated_api_payload({"error": 90309999}) is True
+    assert is_gated_api_payload({"data": [{"item_basic": {}}]}) is False
+    assert is_gated_api_payload(None) is False
+
+
+def test_enrich_cards_with_api_sales():
+    dom_cards = parse_search_html(SEARCH_HTML)
+    mapping = build_api_sales_map(API_JSON["items"])
+    # remove o texto de vendas do DOM para simular a página antiga sem badge
+    stripped = [{**c, "rawSalesText": ""} for c in dom_cards]
+    enriched = enrich_cards_with_api_sales(stripped, mapping)
+    matched = {c["rawSalesText"] for c in enriched if c["rawSalesText"]}
+    assert "2000 vendidos" in matched
+    assert "42 vendidos" in matched
+    # carta com vendas já preenchida não é sobrescrita
+    kept = [c for c in parse_search_html(SEARCH_HTML) if c["rawSalesText"]][:1]
+    assert enrich_cards_with_api_sales(kept, mapping)[0]["rawSalesText"] == kept[0]["rawSalesText"]
+
+
+def test_map_api_item_to_raw_card():
+    items = API_JSON["items"]
+    first = items[0]["item_basic"]
+    card = map_api_item_to_raw_card(items[0])
+    assert card is not None
+    assert card["rawHref"] == f"https://shopee.com.br/product/{first['shopid']}/{first['itemid']}"
+    assert card["rawTitle"] == first["name"]
+    assert card["rawPrice"] == f"R$ {first['price_max'] / 100000:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    assert card["rawSalesText"] == f"{first['historical_sold']} vendidos"
+    assert card["rawImageUrl"].endswith(first["image"])
+    assert map_api_item_to_raw_card({}) is None
+
+
+def test_extract_shopee_product_id():
+    assert extract_shopee_product_id("https://shopee.com.br/X-Y-i.111.222?extra=1") == "111.222"
+    assert extract_shopee_product_id("https://shopee.com.br/product/111/222") == "111.222"
+    assert extract_shopee_product_id("https://shopee.com.br/a?shopid=111&itemid=222") == "111.222"
+    assert extract_shopee_product_id("https://shopee.com.br/") == ""
+
+
+def test_enrichment_roundtrip_dom_plus_api():
+    """Cards do DOM + mapa da API: todo card caseável recebe vendas; ids batem."""
+    dom_cards = parse_search_html(SEARCH_HTML)
+    mapping = build_api_sales_map(API_JSON["items"])
+    stripped = [{**c, "rawSalesText": ""} for c in dom_cards]
+    enriched = enrich_cards_with_api_sales(stripped, mapping)
+    for card in enriched:
+        pid = extract_shopee_product_id(card["rawHref"])
+        if pid in mapping:
+            assert card["rawSalesText"] == f"{mapping[pid]} vendidos"
+            assert card["rawHref"] != ""
