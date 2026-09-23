@@ -1,0 +1,9 @@
+# Driver de scraping com Scrapling (Shopee e TikTok) — executado como subprocesso pelo Next.js.
+# Instalação (uma vez):
+#   python -m venv .venv
+#   .venv\Scripts\python -m pip install -r tools\scrapling\requirements.txt
+#   .venv\Scripts\scrapling install
+# Ativação para rodar os testes/CLI manualmente:
+#   .venv\Scripts\activate
+# O binário usado pelo app vem de SCRAPLING_PYTHON (padrão: .venv\Scripts\python.exe).
+scrapling[fetchers]>=0.4.15

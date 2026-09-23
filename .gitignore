@@ -10,6 +10,7 @@ out/
 # Environment
 .env*.local
 .env
+.venv/
 
 # Playwright & Shopee Session Profile
 .shopee_profile/
