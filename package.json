@@ -9,6 +9,7 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
+    "postinstall": "patch-package",
     "seed": "tsx prisma/seed.ts",
     "test": "vitest run --no-file-parallelism"
   },
@@ -27,6 +28,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
+    "patch-package": "^8.0.1",
     "playwright": "^1.50.1",
     "postcss": "^8.5.3",
     "prisma": "^6.4.0",

@@ -31,6 +31,13 @@ describe('GET /api/video/file', () => {
     expect(mockFindUnique).not.toHaveBeenCalled();
   });
 
+  it('aceita id numérico Shopee (itemid) e consulta o produto', async () => {
+    mockFindUnique.mockResolvedValue(null);
+    const res = await callGet('627750190.22899492773');
+    expect(res.status).toBe(404);
+    expect(mockFindUnique).toHaveBeenCalledWith({ where: { id: '627750190.22899492773' } });
+  });
+
   it('retorna 404 para produto inexistente', async () => {
     mockFindUnique.mockResolvedValue(null);
     const res = await callGet('00000000-0000-0000-0000-000000000001');

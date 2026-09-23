@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const id = (searchParams.get('id') || '').trim();
 
-    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) {
+    if (!id || !/^(?:[0-9a-f-]{36}|\d+(?:\.\d+)*)$/i.test(id)) {
       return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
     }
 
