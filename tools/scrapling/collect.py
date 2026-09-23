@@ -36,6 +36,7 @@ from shopee_parser import (
     map_api_item_to_raw_card,
     parse_search_html,
     parse_trending_terms,
+    parse_tiktok_search_html,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -121,6 +122,11 @@ TEMPORARY_BLOCK_MESSAGE = (
     'Shopee bloqueou temporariamente a varredura ("A verificação falhou / Tente novamente mais tarde"). '
     'Aguarde alguns minutos antes de tentar de novo; tentativas em sequência rápida reforçam o bloqueio.'
 )
+TIKTOK_LOGIN_MESSAGE = (
+    'O TikTok exibiu verificação de segurança ou exigiu login para ver os resultados. '
+    'Clique em "Login TikTok", autentique/resolva o desafio uma única vez no navegador visível '
+    'e rode de novo (de preferência com "Modo Visível").'
+)
 
 
 def shopee_block_kind(url: str, text: str) -> str | None:
@@ -159,6 +165,10 @@ BLOCK_MESSAGES = {
     "temp": TEMPORARY_BLOCK_MESSAGE,
 }
 
+BLOCK_MESSAGES_TIKTOK = {
+    "login": TIKTOK_LOGIN_MESSAGE,
+}
+
 
 def tiktok_block_kind(url: str, text: str) -> str | None:
     if "/login" in url:
@@ -185,7 +195,7 @@ def _to_str(data: Any) -> str:
 # --- Ações --------------------------------------------------------------------
 
 
-def open_session(site: str, headful: bool, timeout_ms: int = 80000):
+def open_session(site: str, headful: bool, timeout_ms: int = 80000, retries: int = 3):
     """Abre uma StealthySession com perfil persistente por site.
 
     `real_chrome=True` + `google_search=False` são os achados do spike (ticket 01):
@@ -200,6 +210,7 @@ def open_session(site: str, headful: bool, timeout_ms: int = 80000):
         network_idle=False,
         locale="pt-BR",
         real_chrome=True,
+        retries=retries,
     )
 
 
@@ -441,6 +452,105 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
         }
 
 
+def action_session(site: str) -> dict[str, Any]:
+    """Abre o navegador visível e aguarda a ação humana; fecha ao fechar a aba.
+
+    Espelha openTikTokSession / sessão de login da Shopee: login manual 1x,
+    cookies persistidos no perfil e reutilizados pelas varreduras headless.
+    """
+    emit_log("step", f"[session] Abrindo navegador visível com o perfil persistente de {site}...")
+
+    def hold_open(page: Any) -> None:
+        try:
+            page.goto(HOME_URLS[site], timeout=45000)
+        except Exception:  # noqa: BLE001 — navegação inicial pode falhar em tela de login
+            pass
+        try:
+            while not page.is_closed():
+                time.sleep(1)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        with open_session(site, headful=True, retries=1) as session:
+            emit_log(
+                "success",
+                f"{site.capitalize()} aberto(a)! Faça o login ou resolva qualquer verificação. "
+                "Feche a aba/janela para encerrar a sessão.",
+            )
+            try:
+                session.fetch(
+                    HOME_URLS[site],
+                    timeout=80000,
+                    wait=1000,
+                    load_dom=True,
+                    google_search=False,
+                    page_action=hold_open,
+                )
+            except Exception:  # noqa: BLE001 — a página fecha junto com a ação humana
+                pass
+            emit_log("info", f"[session] Sessão de {site} encerrada; cookies salvos no perfil.")
+        return {"ok": True, "site": site, "message": "Sessão encerrada e perfil salvo."}
+    except Exception as exc:  # noqa: BLE001
+        emit_log("error", f"[session] Falha ao abrir {site}: {exc}")
+        return {"ok": False, "site": site, "error": str(exc)}
+
+
+def action_tiktok_search(term: str, headful: bool, save_fixture: bool = False) -> dict[str, Any]:
+    """Busca vídeos no TikTok e devolve cards TikTokSearchCard (ticket 06)."""
+    search_url = f"https://www.tiktok.com/search?q={_urlencode(term)}"
+    emit_log("step", f'[search] Buscando vídeos no TikTok para "{term}"...')
+
+    def page_work(page: Any) -> None:
+        try:
+            human_delay(900, 2000)
+            reset_cursor(page)
+            human_delay(600, 1300)
+            human_scroll(page, 2600)
+            human_delay(600, 1400)
+        except Exception as exc:  # noqa: BLE001
+            emit_log("info", f"[search] Humanização interrompida: {type(exc).__name__}")
+
+    with open_session("tiktok", headful) as session:
+        response = session.fetch(
+            search_url,
+            timeout=80000,
+            wait=3500,
+            load_dom=True,
+            google_search=False,
+            page_action=page_work,
+        )
+
+        final_url = response.url or search_url
+        block = tiktok_block_kind(final_url, response.text or "")
+
+        cards: list[dict[str, str]] = []
+        if block is None:
+            cards = parse_tiktok_search_html(response.body or "")
+
+        if save_fixture:
+            fixture = Path(__file__).resolve().parent / "tests" / "fixtures"
+            fixture.mkdir(parents=True, exist_ok=True)
+            slug = re.sub(r"[^a-z0-9]+", "-", term.lower()).strip("-") or "term"
+            target = fixture / f"tiktok-search-{slug}.html"
+            target.write_text(_to_str(response.body) or "", encoding="utf-8")
+            emit_log("info", f"[search] Fixture salva em {target}")
+
+        if block:
+            emit_log("warn", f"[search] Login-wall/verificação detectada no TikTok: {block}")
+        else:
+            emit_log("info", f'[search] {len(cards)} vídeo(s) encontrado(s) na busca do TikTok.')
+
+        return {
+            "ok": block is None,
+            "term": term,
+            "url": final_url,
+            "block": block,
+            "cards": cards,
+            "count": len(cards),
+        }
+
+
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -449,10 +559,15 @@ def main() -> int:
     parser.add_argument("site", choices=sorted(PROFILES), help="Site alvo")
     parser.add_argument(
         "action",
-        choices=["ping", "terms", "search"],
-        help="Ação a executar (terms/search são da Shopee)",
+        choices=["ping", "terms", "search", "session"],
+        help="Ação a executar (terms/search: Shopee; session: ambos)",
     )
-    parser.add_argument("--term", help="Termo de busca (obrigatório em `search`)")
+    parser.add_argument("--term", help="Termo de busca")
+    parser.add_argument(
+        "--q",
+        dest="q",
+        help="Termo de busca do TikTok (alias de --term)",
+    )
     parser.add_argument(
         "--save-fixture",
         action="store_true",
@@ -461,20 +576,31 @@ def main() -> int:
     parser.add_argument("--headful", action="store_true", help="Janela visível (login/diagnóstico)")
     args = parser.parse_args()
 
-    if args.action in ("terms", "search") and args.site != "shopee":
-        emit_result(False, error=f"Ação {args.action} é exclusiva do site shopee.")
-        return 2
+    keyword = (args.q or args.term or "").strip()
 
     try:
         if args.action == "ping":
             data = action_ping(args.site, args.headful)
-        elif args.action == "terms":
-            data = action_terms(args.headful)
-        else:
-            if not args.term or not args.term.strip():
-                emit_result(False, error="`search` requer --term <termo>.")
+        elif args.action == "session":
+            if args.site != "shopee" and args.site != "tiktok":
+                emit_result(False, error=f"Site desconhecido: {args.site}")
                 return 2
-            data = action_search(args.term.strip(), args.headful, save_fixture=args.save_fixture)
+            data = action_session(args.site)
+        elif args.site == "shopee" and args.action == "terms":
+            data = action_terms(args.headful)
+        elif args.site == "shopee" and args.action == "search":
+            if not keyword:
+                emit_result(False, error="`search` da Shopee requer --term <termo>.")
+                return 2
+            data = action_search(keyword, args.headful, save_fixture=args.save_fixture)
+        elif args.site == "tiktok" and args.action == "search":
+            if not keyword:
+                emit_result(False, error="`search` do TikTok requer --q <termo>.")
+                return 2
+            data = action_tiktok_search(keyword, args.headful, save_fixture=args.save_fixture)
+        else:
+            emit_result(False, error=f"Ação {args.action} não existe para o site {args.site}.")
+            return 2
     except Exception as exc:  # noqa: BLE001 — contrato exige uma linha `result`
         emit_log("error", f"Driver falhou: {exc}")
         emit_result(False, error=str(exc))
@@ -486,7 +612,8 @@ def main() -> int:
 
     # Gate: reporta erro acionável (mesma semântica do engine)
     block = data.get("block")
-    message = BLOCK_MESSAGES.get(block or "", f"Driver bloqueado em {args.site}: {block}")
+    site_messages = BLOCK_MESSAGES_TIKTOK if args.site == "tiktok" else BLOCK_MESSAGES
+    message = site_messages.get(block or "", f"Driver bloqueado em {args.site}: {block}")
     emit_result(False, error=message)
     return 1
 

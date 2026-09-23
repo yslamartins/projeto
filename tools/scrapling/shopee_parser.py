@@ -10,6 +10,11 @@ import re
 import lxml.html
 
 BASE_URL = "https://shopee.com.br"
+TIKTOK_BASE = "https://www.tiktok.com"
+
+
+def _collapse_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
 
 MAX_PRODUCTS_PER_TERM = 30
 MAX_TERMS_PER_SCAN = 20
@@ -350,3 +355,59 @@ def extract_shopee_product_id(url: str) -> str:
     if shopid.isdigit() and itemid.isdigit():
         return f"{shopid}.{itemid}"
     return ""
+
+
+# --- TikTok (busca de vídeos) ---------------------------------------------------
+# Portado de src/lib/scanner/tiktok-search.ts (collectTikTokSearchCards).
+
+TIKTOK_AUTHOR_RE = re.compile(r"/(@[\w.]+)/")
+
+
+def _tiktok_caption(anchor) -> str:
+    """Legenda: primeiro texto significativo em até 4 níveis de ascendente.
+
+    Pula contadores puramente numéricos (views/sales) quando existe uma
+    legenda real nos níveis seguintes (ex.: `_tiktok_caption` <-> `caption`).
+    """
+    node = anchor.getparent()
+    candidates: list[str] = []
+    for _ in range(4):
+        if node is None:
+            break
+        for el in node.cssselect("span, div, p"):
+            text = _collapse_ws(el.text_content() or "")
+            if len(text) > 2 and text not in candidates:
+                candidates.append(text)
+        node = node.getparent()
+    for text in candidates:
+        if not re.fullmatch(r"[\d.\sKMB+]+", text):
+            return text
+    return candidates[0] if candidates else ""
+
+
+def parse_tiktok_search_html(html: str | bytes) -> list[dict[str, str]]:
+    """Cards de vídeo no formato TikTokSearchCard {href, caption, author}, dedup por href.
+
+    Mesma lógica do engine: `a[href*="/video/"]`, chave = href sem query string,
+    autor extraído de `/(@[\\w.]+)/` na chave.
+    """
+    doc = lxml.html.fromstring(_as_text(html))
+    seen: set[str] = set()
+    cards: list[dict[str, str]] = []
+    for anchor in doc.cssselect('a[href*="/video/"]'):
+        href = (anchor.get("href") or "").strip()
+        if href.startswith("/"):
+            href = TIKTOK_BASE + href
+        key = href.split("?")[0]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        author_match = TIKTOK_AUTHOR_RE.search(key)
+        cards.append(
+            {
+                "href": key,
+                "caption": _tiktok_caption(anchor)[:200],
+                "author": author_match.group(1).lstrip("@") if author_match else "",
+            }
+        )
+    return cards
