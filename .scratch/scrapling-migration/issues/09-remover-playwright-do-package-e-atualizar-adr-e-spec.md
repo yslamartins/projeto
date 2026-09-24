@@ -6,8 +6,13 @@
 
 **Status:** ready-for-agent
 
-- [ ] `playwright` removido do `package.json` e do lockfile (`npm rm`), com o `postinstall`/`patch-package` intacto
-- [ ] Referências ao Playwright em `.gitignore`, `.env.example`/documentação de configuração e scripts avulsos removidas
-- [ ] ADR 0001 atualizado: decisão registra Scrapling como motor de automação de página para a varredura (Shopee e TikTok); decisões de TikDrop, `.videos`, SSE e HITL permanecem
-- [ ] `spec.md` do projeto atualizado com a nova decisão de implementação (automação via Scrapling; varredura como subprocesso Python; Playwright fora de escopo)
-- [ ] `npm ci` + `npm run test` + `npm run build` verdes do zero (confirma que nada vivo usa o Playwright)
+- [x] `playwright` removido do `package.json` e do lockfile (`npm rm`), com o `postinstall`/`patch-package` intacto
+- [x] Referências ao Playwright em `.gitignore`, `.env.example`/documentação de configuração e scripts avulsos removidas
+- [x] ADR 0001 atualizado: decisão registra Scrapling como motor de automação de página para a varredura (Shopee e TikTok); decisões de TikDrop, `.videos`, SSE e HITL permanecem
+- [x] `spec.md` do projeto atualizado com a nova decisão de implementação (automação via Scrapling; varredura como subprocesso Python; Playwright fora de escopo)
+- [ ] `npm ci` + `npm run test` + `npm run build` verdes do zero (confirma que nada vivo usa o Playwright) — **pendente: usuário roda o build localmente** (`npm run test` já verde após o `npm rm`; `npx tsc --noEmit` limpo)
+
+Nota (implementação concluída):
+- `npm rm playwright` removeu o pacote direto (`playwright`/`playwright-core`); restam apenas referências de `peerDependenciesMeta` do `next` (opcional, não instalada).
+- Suíte completa: 17 arquivos / 145 testes verdes após a remoção.
+- ADR 0001 e `spec.md` do projeto reescritos para refletir o motor Scrapling (subprocesso Python) e a saída do Playwright.

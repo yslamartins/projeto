@@ -37,14 +37,15 @@ An automated local web application that monitors Shopee's trending searches, ana
 ## Implementation Decisions
 
 ### Architectural Structure
-- Unified Next.js application (App Router, TypeScript) containing frontend dashboard, API routes, and Playwright automation routines.
-- Playwright Chromium engine configured with persistent browser context stored under `.shopee_profile/` (gitignored).
+- Unified Next.js application (App Router, TypeScript) containing frontend dashboard, API routes, and scraping/runtime orchestrations.
+- Page automation runs in **Scrapling (Python)** as a subprocess driver (`tools/scrapling/collect.py`) spawned by Node with a JSONL contract (logs → SSE, terminal `result` line). Playwright was removed from the scanning path entirely.
+- Persistent browser profiles per site stored under `.shopee_profile/` and `.tiktok_profile/` (gitignored).
 
 ### Scanner Engine Module
-- Modular scraper service responsible for:
-  - Launching the persistent browser context in headless (default) or headful mode.
-  - Navigating to Shopee's trending search sections.
-  - Parsing the search results page sorted by newest.
+- Modular scanner service responsible for:
+  - Spawning the Scrapling driver as a subprocess in headless (default) or headful mode.
+  - Extracting Shopee's trending search sections via the driver.
+  - Collecting search results sorted by newest (Shopee) and search cards (TikTok).
   - Extracting product cards: title, product URL/ID, price, sales count, image URL.
   - Applying qualification rules (`salesCount >= 5 && !db.hasProduct(id)`).
   - Collecting up to 10 eligible products per trending term (inspecting up to 30 products per term, saving all eligible candidates per term before moving on to the next term).
@@ -91,4 +92,4 @@ An automated local web application that monitors Shopee's trending searches, ana
 - The `.shopee_profile/` (Shopee) and `.tiktok_profile/` (TikTok) directories hold active cookies and session storage and must never be committed to source control.
 - The `.videos/` directory holds downloaded MP4 files (private, served via API route) and must never be committed to source control.
 - `videoStatus` transitions: `none -> searched -> downloaded` (or `failed`). Downloads never change the product's own status.
-- Realistic human-like delays and Chrome real channel in Playwright will minimize bot detection.
+- Realistic human-like delays and stealth come from Scrapling (stealth session with real Chrome, adaptive selectors, humanized mouse/scroll inside the Python driver).

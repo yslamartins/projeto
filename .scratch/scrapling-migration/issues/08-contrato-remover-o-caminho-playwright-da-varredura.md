@@ -6,8 +6,14 @@
 
 **Status:** ready-for-agent
 
-- [ ] Nenhum caminho vivo da varredura (Shopee ou TikTok) importa o Playwright
-- [ ] Módulos dedicados ao browser do Playwright (lançador, stealth, humanização, sessão/perfil, contexto ativo) removidos junto com seus imports órfãos
-- [ ] Scripts de diagnóstico avulsos que dependiam do Playwright removidos ou marcados como obsoletos
-- [ ] Suíte de testes e `npm run test` verdes após a remoção (sem rede, fixtures mantidas)
-- [ ] `npm run build` passa sem o caminho antigo da varredura
+- [x] Nenhum caminho vivo da varredura (Shopee ou TikTok) importa o Playwright
+- [x] Módulos dedicados ao browser do Playwright (lançador, stealth, humanização, sessão/perfil, contexto ativo) removidos junto com seus imports órfãos
+- [x] Scripts de diagnóstico avulsos que dependiam do Playwright removidos ou marcados como obsoletos
+- [x] Suíte de testes e `npm run test` verdes após a remoção (sem rede, fixtures mantidas)
+- [ ] `npm run build` passa sem o caminho antigo da varredura — **pendente: usuário roda o build localmente** (`npx tsc --noEmit` já verde)
+
+Nota (implementação concluída):
+- Removidos: `chrome-launcher`, `browser-context`, `stealth`, `humanize`, `api-search` (+ `api-search.test`), `scratch/diagnose-shopee.mjs`, `scratch/diag-*.json`, `scratch/shopee-search-debug.png`, `scratch/_probe-managed.ts`.
+- `profile.ts` agora encerra a sessão do driver via `killActiveCollectSession()` (spawn-driver) antes de renomear o `.shopee_profile`.
+- Suíte completa: 17 arquivos / 145 testes verdes; `tsc --noEmit` sem erros.
+- Último item pendente é o build de aceitação (execução manual do usuário nesta máquina).
