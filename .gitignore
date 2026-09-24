@@ -12,7 +12,7 @@ out/
 .env
 .venv/
 
-# Playwright & Shopee Session Profile
+# Perfis de sessão (Scrapling), sessões e pastas privadas
 .shopee_profile/
 .tiktok_profile/
 .ssstik_profile/
@@ -21,7 +21,6 @@ out/
 .wwebjs_auth/
 .wwebjs_cache/
 test-results/
-playwright-report/
 
 # SQLite databases (except seeds or migrations)
 *.db

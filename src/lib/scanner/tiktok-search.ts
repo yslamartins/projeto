@@ -1,60 +1,6 @@
-import { Page } from 'playwright';
-import path from 'path';
-import fs from 'fs';
 import { scannerEvents } from './events';
-import { closeActiveContext, getActiveContext, setActiveContext } from './browser-context';
-import { launchManagedChrome } from './chrome-launcher';
-import { humanDelay, humanScroll, resetCursor } from './humanize';
-import {
-  rankTikTokVideos,
-  toAbsoluteTikTokUrl,
-  TikTokSearchCard,
-} from './tiktok-relevance';
-
-const TIKTOK_PROFILE_DIR = path.resolve(process.cwd(), '.tiktok_profile');
-const TIKTOK_LOGIN_MESSAGE =
-  'O TikTok exibiu verificação de segurança ou exigiu login para ver os resultados. Clique em "Login TikTok", autentique/ resolva o desafio uma única vez no navegador visível e rode de novo (de preferência com "Modo Visível").';
-
-async function collectTikTokSearchCards(page: Page): Promise<TikTokSearchCard[]> {
-  const cards: TikTokSearchCard[] = await page.evaluate(() => {
-    const found: TikTokSearchCard[] = [];
-
-    const cardEls = Array.from(
-      document.querySelectorAll('a[href*="/video/"]')
-    );
-
-    cardEls.forEach((el) => {
-      const href = (el as HTMLAnchorElement).href || '';
-      if (!href) return;
-      const key = href.split('?')[0];
-      if (found.some((c) => c.href === key)) return;
-
-      // Legenda próxima ao link: sobe no contêiner e desce até um texto
-      let caption = '';
-      let node: HTMLElement | null = el as HTMLElement;
-      for (let depth = 0; depth < 4 && node && !caption; depth++) {
-        node = node.parentElement;
-        if (node) {
-          const texts = Array.from(node.querySelectorAll('span, div, p'))
-            .map((n) => (n.textContent || '').trim())
-            .filter((t) => t && t.length > 2);
-          caption = texts[0] || '';
-        }
-      }
-
-      const authorMatch = key.match(/\/(@[\w.]+)\//);
-      found.push({
-        href: key,
-        caption: (caption || '').slice(0, 200),
-        author: authorMatch ? authorMatch[1].replace('@', '') : '',
-      });
-    });
-
-    return found;
-  });
-
-  return cards;
-}
+import { rankTikTokVideos, toAbsoluteTikTokUrl, TikTokSearchCard } from './tiktok-relevance';
+import { runCollect, runCollectSession } from './spawn-driver';
 
 function extractInterestingTikTokCards(cards: TikTokSearchCard[]): TikTokSearchCard[] {
   const seen = new Set<string>();
@@ -68,54 +14,34 @@ function extractInterestingTikTokCards(cards: TikTokSearchCard[]): TikTokSearchC
   return unique;
 }
 
-export async function openTikTokSession(): Promise<{
+interface TikTokSearchOutcome {
+  term: string;
+  cards: TikTokSearchCard[];
+  count: number;
+  block: string | null;
+}
+
+export function openTikTokSession(): Promise<{
   success: boolean;
   message?: string;
   error?: string;
 }> {
   try {
-    if (!fs.existsSync(TIKTOK_PROFILE_DIR)) {
-      fs.mkdirSync(TIKTOK_PROFILE_DIR, { recursive: true });
-    }
-
-    if (getActiveContext()) {
-      scannerEvents.emit('warn', 'Fechando sessão de navegador anterior para liberar o perfil...');
-      await closeActiveContext();
-    }
-
     scannerEvents.emit('step', 'Iniciando navegador Chrome visível com perfil TikTok (.tiktok_profile)...');
 
-    const managed = await launchManagedChrome({
-      userDataDir: TIKTOK_PROFILE_DIR,
-      headless: false,
-    });
-    const context = managed.context;
-    setActiveContext(context, managed.dispose);
-
-    const pages = context.pages();
-    const page = pages.length > 0 ? pages[0] : await context.newPage();
-
-    scannerEvents.emit('info', 'Navegando para o TikTok...');
-    await page.goto('https://www.tiktok.com', {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
+    // Sessão headful do driver: permanece aberta até o usuário fechar a aba/janela.
+    runCollectSession({ args: ['tiktok', 'session'] });
 
     scannerEvents.emit(
       'success',
-      'TikTok aberto! Faça o login ou resolva qualquer verificação. A janela pode ser fechada quando terminar.'
+      'TikTok aberto! Faça o login ou resolva qualquer verificação. Feche a janela quando terminar; os cookies são salvos no perfil.'
     );
 
-    page.on('close', async () => {
-      await closeActiveContext();
-      scannerEvents.emit('info', 'Sessão do TikTok encerrada e cookies salvos no perfil.');
-    });
-
-    return { success: true, message: 'Navegador TikTok aberto com sucesso.' };
+    return Promise.resolve({ success: true, message: 'Navegador TikTok aberto com sucesso.' });
   } catch (error: any) {
     console.error('Error opening TikTok session:', error);
     scannerEvents.emit('error', `Falha ao abrir TikTok: ${error.message}`);
-    return { success: false, error: error.message };
+    return Promise.resolve({ success: false, error: error.message });
   }
 }
 
@@ -136,65 +62,26 @@ export async function searchTikTokVideo(options: {
   }
 
   const headful = Boolean(options.headful);
-  let context: any;
 
   try {
     scannerEvents.setVideoProcessing(true);
 
-    if (!fs.existsSync(TIKTOK_PROFILE_DIR)) {
-      fs.mkdirSync(TIKTOK_PROFILE_DIR, { recursive: true });
+    const args = ['tiktok', 'search', '--q', term, ...(headful ? ['--headful'] : [])];
+    const outcome = await runCollect<TikTokSearchOutcome>({ args });
+
+    // Login-wall/verificação chega como erro acionável do próprio driver (PT-BR)
+    if (!outcome.ok) {
+      const message = outcome.error || 'Falha ao buscar no TikTok.';
+      scannerEvents.emit('error', message);
+      return { success: false, error: message };
     }
 
-    if (getActiveContext()) {
-      scannerEvents.emit(
-        'warn',
-        'Fechando sessão de navegador aberta para liberar o perfil persistente...'
-      );
-      await closeActiveContext();
-    }
-
-    const managed = await launchManagedChrome({
-      userDataDir: TIKTOK_PROFILE_DIR,
-      headless: !headful,
-    });
-    context = managed.context;
-    setActiveContext(context, managed.dispose);
-
-    const page = context.pages()[0] || (await context.newPage());
-
-    scannerEvents.emit('step', `Buscando vídeos no TikTok para "${term}"...`);
-    await page.goto(`https://www.tiktok.com/search?q=${encodeURIComponent(term)}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
-
-    await page.waitForTimeout(3500);
-    await resetCursor(page);
-
-    // Detecção de login-wall / verificação
-    const pageUrl = page.url();
-    const bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
-    const blocked =
-      pageUrl.includes('/login') ||
-      /verifique|log in to continue|faça login|para continuar|verification|captcha/i.test(
-        bodyText.slice(0, 2500)
-      );
-
-    if (blocked) {
-      scannerEvents.emit('error', TIKTOK_LOGIN_MESSAGE);
-      return { success: false, error: TIKTOK_LOGIN_MESSAGE };
-    }
-
-    // Rola a página de forma humana para carregar mais resultados
-    await humanScroll(page, 2600);
-    await humanDelay(600, 1400);
-
-    const rawCards = await collectTikTokSearchCards(page);
+    const rawCards = Array.isArray(outcome.data?.cards) ? outcome.data!.cards : [];
     const cards = extractInterestingTikTokCards(rawCards);
 
-    if (cards.length === 0 && (await isTikTokBlocked(page))) {
-      scannerEvents.emit('error', TIKTOK_LOGIN_MESSAGE);
-      return { success: false, error: TIKTOK_LOGIN_MESSAGE };
+    if (cards.length === 0) {
+      scannerEvents.emit('info', 'Nenhum vídeo encontrado na busca do TikTok.');
+      return { success: false, error: 'Nenhum vídeo relevante encontrado no TikTok.' };
     }
 
     scannerEvents.emit(
@@ -224,22 +111,6 @@ export async function searchTikTokVideo(options: {
     scannerEvents.emit('error', `Erro ao buscar no TikTok: ${error.message}`);
     return { success: false, error: error.message };
   } finally {
-    await closeActiveContext();
     scannerEvents.setVideoProcessing(false);
-  }
-}
-
-async function isTikTokBlocked(page: Page): Promise<boolean> {
-  try {
-    const url = page.url();
-    const text = (await page.locator('body').innerText({ timeout: 4000 })) || '';
-    return (
-      url.includes('/login') ||
-      /verifique|log in to continue|faça login|para continuar|verification|captcha/i.test(
-        text.slice(0, 2500)
-      )
-    );
-  } catch {
-    return false;
   }
 }

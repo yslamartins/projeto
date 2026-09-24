@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { closeActiveContext } from './browser-context';
+import { killActiveCollectSession } from './spawn-driver';
 
 const PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
 const BACKUP_DIR = path.resolve(process.cwd(), 'backups');
@@ -20,9 +20,10 @@ export async function resetShopeeProfile(): Promise<{
   error?: string;
 }> {
   try {
-    // Garante que nenhum navegador esteja segurando lock nos arquivos do perfil.
-    await closeActiveContext();
-    // O Chrome fecha de forma assíncrona (taskkill); dá um tempo antes de mover.
+    // Garante que nenhuma sessão do driver Python esteja segurando lock nos
+    // arquivos do perfil (a janela de login do Scrapling usa o .shopee_profile).
+    killActiveCollectSession();
+    // O subprocesso morre de forma assíncrona; dá um tempo antes de mover.
     await sleep(2000);
 
     if (!fs.existsSync(PROFILE_DIR)) {
