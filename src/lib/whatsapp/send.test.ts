@@ -8,11 +8,38 @@ const mocks = vi.hoisted(() => {
   const mockFindGroupId = vi.fn<(...args: any[]) => Promise<string | null>>(
     async () => null
   );
+  const mockFindGroupIdLive = vi.fn<(...args: any[]) => Promise<string | null>>(
+    async () => null
+  );
+  const mockPages = vi.fn<(...args: any[]) => Promise<any[]>>(async () => []);
+  const mockReload = vi.fn<(...args: any[]) => Promise<any>>(async () => undefined);
+  const mockReadyEvaluate = vi.fn<(...args: any[]) => Promise<any>>(async () => true);
+  const mockCreateCDPSession = vi.fn<(...args: any[]) => Promise<any>>(
+    async () => ({
+      send: vi.fn(async () => {}),
+      detach: vi.fn(async () => {}),
+    })
+  );
+  const mockEvaluate = vi.fn<(...args: any[]) => Promise<any>>(
+    async (_fn, ...args) => {
+      if (args.length === 0) return mockReadyEvaluate();
+      return mockFindGroupId();
+    }
+  );
   return {
     mockSendMessage,
     mockFindGroupId,
+    mockFindGroupIdLive,
+    mockPages,
+    mockReload,
+    mockReadyEvaluate,
+    mockCreateCDPSession,
+    mockEvaluate,
     setMockGroupIds: (ids: (string | null)[]) => {
       mockFindGroupId.mockImplementation(async () =>
+        ids.length ? ids[0] : null
+      );
+      mockFindGroupIdLive.mockImplementation(async () =>
         ids.length ? ids[0] : null
       );
     },
@@ -28,7 +55,12 @@ vi.mock('whatsapp-web.js', () => ({
 vi.mock('./client', () => ({
   getWhatsAppState: vi.fn(),
   ensureWhatsAppSession: vi.fn(async () => ({
-    pupPage: { evaluate: mocks.mockFindGroupId },
+    pupPage: {
+      evaluate: mocks.mockEvaluate,
+      reload: mocks.mockReload,
+      createCDPSession: mocks.mockCreateCDPSession,
+    },
+    pupBrowser: { pages: mocks.mockPages },
     sendMessage: mocks.mockSendMessage,
   })),
 }));
@@ -126,6 +158,91 @@ describe('sendVideoAndLinkToGroup', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('network error');
+  });
+
+  it('re-envia quando o WA Web recarregou e o frame ficou órfão (detached frame)', async () => {
+    mocks.mockSendMessage
+      .mockRejectedValueOnce(
+        new Error("Attempted to use detached Frame '9B4DECE9B9444DD6C287FD930172A54E'")
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4', 200, 5);
+
+    expect(result.success).toBe(true);
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(2);
+    const [chatId, , options] = mocks.mockSendMessage.mock
+      .calls[1] as unknown as [string, any, any];
+    expect(chatId).toBe('120363012345678901@g.us');
+    expect(options.caption).toContain(fakeProduct.title);
+  });
+
+  it('tenta de novo quando o frame órfão aparece na busca do grupo', async () => {
+    mocks.mockFindGroupId
+      .mockRejectedValueOnce(
+        new Error("Attempted to use detached Frame 'DBFE'")
+      )
+      .mockResolvedValueOnce('120363012345678901@g.us');
+
+    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4', 200, 5);
+
+    expect(result.success).toBe(true);
+    expect(mocks.mockFindGroupId).toHaveBeenCalledTimes(2);
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaponta para uma página viva do WA Web antes de reenviar', async () => {
+    mocks.mockPages.mockResolvedValue([
+      {
+        evaluate: mocks.mockFindGroupIdLive,
+        isClosed: () => false,
+        url: () => 'https://web.whatsapp.com/?some=query',
+      },
+    ]);
+    mocks.mockSendMessage
+      .mockRejectedValueOnce(
+        new Error("Attempted to use detached Frame '9B4D'")
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4', 200, 5);
+
+    expect(result.success).toBe(true);
+    expect(mocks.mockPages).toHaveBeenCalledTimes(1);
+    expect(mocks.mockFindGroupId).toHaveBeenCalledTimes(1);
+    expect(mocks.mockFindGroupIdLive).toHaveBeenCalledTimes(1);
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('recarrega a página e espera a sessão reconectar antes de reenviar', async () => {
+    mocks.mockSendMessage
+      .mockRejectedValueOnce(
+        new Error("Attempted to use detached Frame '9B4D'")
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4', 200, 5);
+
+    expect(result.success).toBe(true);
+    expect(mocks.mockReload).toHaveBeenCalledTimes(1);
+    expect(mocks.mockReadyEvaluate).toHaveBeenCalledTimes(1);
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(2);
+    const [chatId, , options] = mocks.mockSendMessage.mock
+      .calls[1] as unknown as [string, any, any];
+    expect(chatId).toBe('120363012345678901@g.us');
+    expect(options.caption).toContain(fakeProduct.title);
+  });
+
+  it('reporta o erro se o segundo envio também falhar por frame órfão', async () => {
+    mocks.mockSendMessage.mockRejectedValue(
+      new Error("Attempted to use detached Frame 'ABC'")
+    );
+
+    const result = await sendVideoAndLinkToGroup(fakeProduct, '/tmp/video.mp4', 200, 5);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('detached Frame');
+    expect(mocks.mockSendMessage).toHaveBeenCalledTimes(2);
   });
 });
 

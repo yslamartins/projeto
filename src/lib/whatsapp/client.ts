@@ -8,6 +8,10 @@ export type WhatsAppState = 'disconnected' | 'connecting' | 'connected';
 const SESSION_DIR = '.whatsapp';
 const INIT_RETRY_DELAY_MS = 1500;
 const MAX_INIT_ATTEMPTS = 2;
+// Mantém a página do WA Web "viva" enquanto o pipeline de vídeo roda (minutos
+// de ociosidade): sem esse toque periódico o Chrome descarta o renderer do
+// frame ("Attempted to use detached Frame" na próxima chamada).
+const WHATSAPP_KEEPALIVE_MS = 15000;
 
 interface WhatsAppRuntime {
   state: WhatsAppState;
@@ -50,9 +54,37 @@ function buildClient(): Client {
     authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
     puppeteer: {
       headless: process.env.WHATSAPP_HEADLESS === 'true',
-      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        // WA Web fica ocioso durante o pipeline de vídeo; o Chrome então
+        // descarta/recria o renderer e o frame antigo fica desanexado ("Attempted
+        // to use detached Frame"). Esses flags impedem o descarte por economia de
+        // memória e a troca de processo por site isolation.
+        '--disable-features=IsolateOrigins,site-per-process,MemorySaverMode',
+        '--disable-site-isolation-trials',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+      ],
     },
   });
+
+  let keepAliveTimer: NodeJS.Timeout | null = null;
+  const stopKeepAlive = () => {
+    if (keepAliveTimer) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
+  };
+  const startKeepAlive = () => {
+    if (keepAliveTimer) return;
+    // Chama `evaluate` periodicamente só para indicar atividade ao Chrome; se a
+    // página estiver navegando, o erro é esperado e ignorado.
+    keepAliveTimer = setInterval(() => {
+      client.pupPage?.evaluate(() => document.readyState).catch(() => {});
+    }, WHATSAPP_KEEPALIVE_MS);
+  };
 
   client.on('qr', () => {
     runtime.state = 'connecting';
@@ -69,16 +101,19 @@ function buildClient(): Client {
 
   client.on('ready', () => {
     runtime.state = 'connected';
+    startKeepAlive();
     scannerEvents.emit('success', 'WhatsApp: conectado.');
   });
 
   client.on('auth_failure', (message) => {
+    stopKeepAlive();
     markDisconnected();
     scheduleTeardown(client);
     scannerEvents.emit('error', `WhatsApp: falha na autenticaÃ§Ã£o (${message}).`);
   });
 
   client.on('disconnected', (reason) => {
+    stopKeepAlive();
     markDisconnected();
     scheduleTeardown(client);
     scannerEvents.emit('warn', `WhatsApp: sessÃ£o desconectada (${reason}).`);
