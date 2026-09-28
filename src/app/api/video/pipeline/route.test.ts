@@ -150,7 +150,7 @@ describe('POST /api/video/pipeline', () => {
     );
   });
 
-  it('envia vídeo e link ao WhatsApp após download bem-sucedido', async () => {
+  it('não envia ao WhatsApp: o envio é uma ação separada', async () => {
     searchModule.searchTikTokVideo.mockResolvedValue({
       success: true,
       videoUrl: 'https://www.tiktok.com/@u/video/123',
@@ -160,39 +160,11 @@ describe('POST /api/video/pipeline', () => {
       videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
       videoPath: 'C:\\projeto\\.videos\\abc.mp4',
     });
-    whatsappSendModule.sendProductVideoToWhatsApp.mockResolvedValue(undefined);
 
     const res = await callPipeline(baseProduct.id);
     const data = await res.json();
 
     expect(data.success).toBe(true);
-    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledTimes(1);
-    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: baseProduct.id,
-        title: baseProduct.title,
-      }),
-      'C:\\projeto\\.videos\\abc.mp4'
-    );
-  });
-
-  it('falha no envio ao WhatsApp não derruba o pipeline (best-effort)', async () => {
-    searchModule.searchTikTokVideo.mockResolvedValue({
-      success: true,
-      videoUrl: 'https://www.tiktok.com/@u/video/123',
-    });
-    downloadModule.downloadTikTokVideo.mockResolvedValue({
-      success: true,
-      videoUrl: 'https://tikdrop-k8re.onrender.com/resolved/video.mp4',
-      videoPath: 'C:\\projeto\\.videos\\abc.mp4',
-    });
-    whatsappSendModule.sendProductVideoToWhatsApp.mockResolvedValue(undefined);
-
-    const res = await callPipeline(baseProduct.id);
-    const data = await res.json();
-
-    expect(data.success).toBe(true);
-    expect(data.product.videoStatus).toBe('downloaded');
-    expect(whatsappSendModule.sendProductVideoToWhatsApp).toHaveBeenCalledTimes(1);
+    expect(whatsappSendModule.sendProductVideoToWhatsApp).not.toHaveBeenCalled();
   });
 });

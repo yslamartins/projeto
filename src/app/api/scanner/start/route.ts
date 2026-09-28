@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runShopeeScanner } from '@/lib/scanner/engine';
 import { scannerEvents } from '@/lib/scanner/events';
+import { queueRunner } from '@/lib/queue/runner';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,13 @@ export async function POST(request: NextRequest) {
     if (scannerEvents.getIsScanning()) {
       return NextResponse.json(
         { success: false, error: 'Uma varredura já está em execução no momento.' },
+        { status: 409 }
+      );
+    }
+
+    if (queueRunner.isRunning()) {
+      return NextResponse.json(
+        { success: false, error: 'Uma fila de vídeos está em andamento.' },
         { status: 409 }
       );
     }
