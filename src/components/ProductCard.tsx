@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ExternalLink, Copy, Check, TrendingUp, Tag, Trash2, Video, Loader2, Download } from 'lucide-react';
+import { ExternalLink, Copy, Check, TrendingUp, Tag, Trash2, Video, Loader2, Download, Send } from 'lucide-react';
 import { Product, ProductStatus } from '@/types/product';
 
 interface ProductCardProps {
@@ -11,7 +11,10 @@ interface ProductCardProps {
   onSearchVideo?: (id: string) => Promise<void>;
   onDownloadVideo?: (id: string) => Promise<void>;
   onPipelineVideo?: (id: string) => Promise<void>;
+  onSendToWhatsApp?: (id: string) => Promise<void>;
   videoProcessing?: boolean;
+  whatsappSending?: boolean;
+  actionsDisabled?: boolean;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -21,16 +24,25 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onSearchVideo,
   onDownloadVideo,
   onPipelineVideo,
+  onSendToWhatsApp,
   videoProcessing,
+  whatsappSending,
+  actionsDisabled,
 }) => {
   const [copied, setCopied] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [imgError, setImgError] = useState(false);
 
-  const searching = Boolean(videoProcessing);
+  const searching = Boolean(videoProcessing) || Boolean(actionsDisabled);
+  // `sending` é só o spinner deste card; `actionsDisabled` trava sem fingir que
+  // este card é o que está sendo enviado agora (a fila é que está trabalhando).
+  const sending = Boolean(whatsappSending);
+  const sendLocked = sending || Boolean(actionsDisabled);
   const videoAvailable = product.videoStatus === 'downloaded' && product.videoPath;
   const canSearch = onSearchVideo && (!product.tikTokUrl && product.videoStatus === 'none');
   const canDownload = onDownloadVideo && product.tikTokUrl && !videoAvailable && product.videoStatus !== 'failed';
+  const canSendToWhatsApp = Boolean(onSendToWhatsApp) && Boolean(videoAvailable);
+  const alreadySent = product.whatsappStatus === 'sent';
 
   const handleCopyLink = async () => {
     try {
@@ -173,22 +185,62 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </span>
         </div>
 
+        {/* WhatsApp Status Badge */}
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-medium text-gray-500">WhatsApp:</label>
+          <span
+            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
+              product.whatsappStatus === 'sent'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : product.whatsappStatus === 'failed'
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-gray-100 text-gray-500 border-gray-200'
+            }`}
+          >
+            {product.whatsappStatus === 'sent' && 'Enviado'}
+            {product.whatsappStatus === 'failed' && 'Falhou'}
+            {product.whatsappStatus !== 'sent' && product.whatsappStatus !== 'failed' && 'Não enviado'}
+          </span>
+        </div>
+
         {/* Buttons */}
         <div className="space-y-2">
           {onPipelineVideo && onSearchVideo && onDownloadVideo && (
             <>
               {videoAvailable ? (
                 <>
-                  <a
-                    href={`/api/video/file?id=${product.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 w-full text-xs font-semibold py-2 px-2.5 bg-black hover:bg-gray-800 text-white rounded-xl transition shadow-sm"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Baixar / ver vídeo</span>
-                    <ExternalLink className="w-3 h-3 opacity-60" />
-                  </a>
+                  <div className="grid grid-cols-2 gap-2">
+                    <a
+                      href={`/api/video/file?id=${product.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-2.5 bg-black hover:bg-gray-800 text-white rounded-xl transition shadow-sm"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Baixar / ver vídeo</span>
+                      <ExternalLink className="w-3 h-3 opacity-60" />
+                    </a>
+                    {canSendToWhatsApp && (
+                      <button
+                        type="button"
+                        onClick={() => onSendToWhatsApp!(product.id)}
+                        disabled={sendLocked || alreadySent}
+                        className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-2.5 bg-[#25D366] hover:bg-[#1eb856] text-white rounded-xl transition shadow-sm disabled:opacity-50"
+                      >
+                        {sending ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Enviando...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{alreadySent ? 'Enviado' : 'Enviar WhatsApp'}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                   <video
                     src={`/api/video/file?id=${product.id}`}
                     controls

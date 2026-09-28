@@ -236,13 +236,3 @@ export async function sendVideoAndLinkToGroup(
     return { success: false, error: message };
   }
 }
-
-export async function sendProductVideoToWhatsApp(
-  product: Pick<Product, 'title' | 'productUrl'>,
-  videoPath: string | null
-): Promise<void> {
-  if (!videoPath) {
-    return;
-  }
-  await sendVideoAndLinkToGroup(product, videoPath).catch(() => {});
-}

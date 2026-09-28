@@ -1,11 +1,12 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Play, LogIn, Eye, Sparkles, RefreshCw, Filter, Video, Trash2 } from 'lucide-react';
+import { Play, LogIn, Eye, Sparkles, RefreshCw, Filter, Video, Trash2, ListVideo, Square, Send } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { ProductCard } from '@/components/ProductCard';
 import { TerminalDrawer } from '@/components/TerminalDrawer';
-import { Product, ProductStatus, ScanLogEvent } from '@/types/product';
+import { useScannerLogs } from '@/hooks/useScannerLogs';
+import { Product, ProductStatus, QueueState } from '@/types/product';
 
 export default function Dashboard() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -17,7 +18,9 @@ export default function Dashboard() {
   const [isLaunchingTikTok, setIsLaunchingTikTok] = useState(false);
   const [isResettingProfile, setIsResettingProfile] = useState(false);
   const [videoSearchingId, setVideoSearchingId] = useState<string | null>(null);
-  const [logs, setLogs] = useState<ScanLogEvent[]>([]);
+  const [whatsappSendingId, setWhatsappSendingId] = useState<string | null>(null);
+  const [queue, setQueue] = useState<QueueState | null>(null);
+  const { logs, addLog, clearLogs, subscribe } = useScannerLogs();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   const fetchProducts = async () => {
@@ -38,16 +41,38 @@ export default function Dashboard() {
     fetchProducts();
   }, [statusFilter]);
 
-  const addLog = (type: ScanLogEvent['type'], message: string) => {
-    const newLog: ScanLogEvent = {
-      type,
-      message,
-      timestamp: new Date().toLocaleTimeString(),
-    };
-    setLogs((prev) => [...prev, newLog]);
-  };
-
   const [customSearchTerm, setCustomSearchTerm] = useState('');
+
+  const queueRunning = queue?.status === 'running' || queue?.status === 'cancelling';
+  const queueLabel = queue?.kind === 'send' ? 'envio' : 'download';
+
+  // Acompanha a fila em segundo plano: o progresso chega pelo terminal via SSE,
+  // aqui é só para saber quando ela terminou (e atualizar os cards).
+  useEffect(() => {
+    if (!queueRunning) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/queue');
+        const data = await res.json();
+        if (data.success) {
+          setQueue((prev) => {
+            if (prev && prev.status !== 'idle' && data.queue.status === 'idle') {
+              addLog(
+                'success',
+                `Fila de ${queueLabel}: ${data.queue.succeeded} concluído(s), ${data.queue.failed} falha(s).`
+              );
+              fetchProducts();
+            }
+            return data.queue;
+          });
+        }
+      } catch {
+        // servidor ocupado com a fila; tenta de novo no próximo tique
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+    // `queueLabel` acompanha `queue.kind`, que não muda durante a execução.
+  }, [queueRunning, queueLabel]);
 
   const TRENDING_CHIPS = [
     'Projetor',
@@ -79,28 +104,15 @@ export default function Dashboard() {
     );
 
     try {
-      const eventSource = new EventSource('/api/scanner/logs');
-
-      eventSource.onmessage = (event) => {
-        try {
-          const logData = JSON.parse(event.data);
-          addLog(logData.type || 'info', logData.message);
-
-          if (
-            logData.type === 'success' ||
-            logData.message.includes('finalizada') ||
-            logData.message.includes('concluída')
-          ) {
-            fetchProducts();
-          }
-        } catch {
-          addLog('info', event.data);
+      const unsubscribe = subscribe((logData) => {
+        if (
+          logData.type === 'success' ||
+          logData.message.includes('finalizada') ||
+          logData.message.includes('concluída')
+        ) {
+          fetchProducts();
         }
-      };
-
-      eventSource.onerror = () => {
-        eventSource.close();
-      };
+      });
 
       // Trigger start
       const startRes = await fetch('/api/scanner/start', {
@@ -114,7 +126,7 @@ export default function Dashboard() {
       if (!startData.success) {
         addLog('error', `Erro ao disparar varredura: ${startData.error}`);
         setIsScanning(false);
-        eventSource.close();
+        unsubscribe();
         return;
       }
 
@@ -126,14 +138,14 @@ export default function Dashboard() {
           if (!statusData.isScanning) {
             clearInterval(checkInterval);
             setIsScanning(false);
-            eventSource.close();
+            unsubscribe();
             fetchProducts();
             addLog('success', 'Varredura finalizada. Lista de produtos atualizada.');
           }
         } catch {
           clearInterval(checkInterval);
           setIsScanning(false);
-          eventSource.close();
+          unsubscribe();
         }
       }, 2000);
 
@@ -214,16 +226,7 @@ export default function Dashboard() {
     setVideoSearchingId(id);
     setIsDrawerOpen(true);
 
-    const eventSource = new EventSource('/api/scanner/logs');
-    eventSource.onmessage = (event) => {
-      try {
-        const logData = JSON.parse(event.data);
-        addLog(logData.type || 'info', logData.message);
-      } catch {
-        addLog('info', event.data);
-      }
-    };
-    eventSource.onerror = () => eventSource.close();
+    const unsubscribe = subscribe();
 
     addLog('step', `Buscando vídeo no TikTok para o produto selecionado...`);
 
@@ -244,7 +247,7 @@ export default function Dashboard() {
     } catch (err: any) {
       addLog('error', `Erro ao buscar vídeo: ${err.message}`);
     } finally {
-      eventSource.close();
+      unsubscribe();
       setVideoSearchingId(null);
     }
   };
@@ -254,16 +257,7 @@ export default function Dashboard() {
     setVideoSearchingId(id);
     setIsDrawerOpen(true);
 
-    const eventSource = new EventSource('/api/scanner/logs');
-    eventSource.onmessage = (event) => {
-      try {
-        const logData = JSON.parse(event.data);
-        addLog(logData.type || 'info', logData.message);
-      } catch {
-        addLog('info', event.data);
-      }
-    };
-    eventSource.onerror = () => eventSource.close();
+    const unsubscribe = subscribe();
 
     addLog('step', `Iniciando download do vídeo via TikDrop...`);
 
@@ -284,7 +278,7 @@ export default function Dashboard() {
     } catch (err: any) {
       addLog('error', `Erro ao baixar vídeo: ${err.message}`);
     } finally {
-      eventSource.close();
+      unsubscribe();
       setVideoSearchingId(null);
     }
   };
@@ -294,16 +288,7 @@ export default function Dashboard() {
     setVideoSearchingId(id);
     setIsDrawerOpen(true);
 
-    const eventSource = new EventSource('/api/scanner/logs');
-    eventSource.onmessage = (event) => {
-      try {
-        const logData = JSON.parse(event.data);
-        addLog(logData.type || 'info', logData.message);
-      } catch {
-        addLog('info', event.data);
-      }
-    };
-    eventSource.onerror = () => eventSource.close();
+    const unsubscribe = subscribe();
 
     addLog('step', `Pipeline: buscar e baixar vídeo do TikTok (termo do produto)...`);
 
@@ -324,8 +309,103 @@ export default function Dashboard() {
     } catch (err: any) {
       addLog('error', `Erro ao executar pipeline: ${err.message}`);
     } finally {
-      eventSource.close();
+      unsubscribe();
       setVideoSearchingId(null);
+    }
+  };
+
+  const handleSendToWhatsApp = async (id: string) => {
+    if (whatsappSendingId) return;
+    setWhatsappSendingId(id);
+    setIsDrawerOpen(true);
+
+    const unsubscribe = subscribe();
+
+    addLog('step', 'WhatsApp: enviando o vídeo do produto selecionado...');
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: id }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        addLog('success', 'Vídeo enviado para o grupo.');
+        fetchProducts();
+      } else {
+        addLog('error', `Envio ao WhatsApp falhou: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao enviar ao WhatsApp: ${err.message}`);
+    } finally {
+      unsubscribe();
+      setWhatsappSendingId(null);
+    }
+  };
+
+  const handleStartDownloadQueue = async () => {
+    if (queueRunning) return;
+    setIsDrawerOpen(true);
+
+    const unsubscribe = subscribe();
+    addLog('step', 'Fila de download: montando a lista de produtos...');
+
+    try {
+      const res = await fetch('/api/queue/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headful: headfulMode }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setQueue(data.queue);
+        addLog('success', `Fila de download iniciada com ${data.queue.total} produto(s).`);
+      } else {
+        addLog('error', `Não foi possível iniciar a fila: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao iniciar a fila de download: ${err.message}`);
+    } finally {
+      unsubscribe();
+    }
+  };
+
+  const handleStartSendQueue = async () => {
+    if (queueRunning) return;
+    setIsDrawerOpen(true);
+
+    const unsubscribe = subscribe();
+    addLog('step', 'Fila de envio: montando a lista de vídeos para o WhatsApp...');
+
+    try {
+      const res = await fetch('/api/queue/send', { method: 'POST' });
+      const data = await res.json();
+
+      if (data.success) {
+        setQueue(data.queue);
+        addLog('success', `Fila de envio iniciada com ${data.queue.total} vídeo(s).`);
+      } else {
+        addLog('error', `Não foi possível iniciar a fila de envio: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao iniciar a fila de envio: ${err.message}`);
+    } finally {
+      unsubscribe();
+    }
+  };
+
+  const handleCancelQueue = async () => {
+    try {
+      const res = await fetch('/api/queue/cancel', { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) {
+        addLog('warn', `Não foi possível parar a fila: ${data.error}`);
+      }
+    } catch (err: any) {
+      addLog('error', `Erro ao parar a fila: ${err.message}`);
     }
   };
 
@@ -435,7 +515,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => handleStartScan()}
-              disabled={isScanning}
+              disabled={isScanning || queueRunning}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#EE4D2D] hover:bg-[#D03E1F] text-white text-xs font-bold rounded-xl shadow-md shadow-orange-500/20 transition disabled:opacity-50 active:scale-95"
             >
               {isScanning ? (
@@ -450,6 +530,48 @@ export default function Dashboard() {
                 </>
               )}
             </button>
+
+            {/* Download Queue Button */}
+            <button
+              type="button"
+              onClick={handleStartDownloadQueue}
+              disabled={queueRunning || isScanning}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-xl shadow-sm transition disabled:opacity-50"
+            >
+              <ListVideo className="w-4 h-4" />
+              <span>
+                {queueRunning && queue?.kind === 'download'
+                  ? `Baixando ${queue.processed}/${queue.total}...`
+                  : 'Fila: Baixar Todos os Vídeos'}
+              </span>
+            </button>
+
+            {/* Send Queue Button */}
+            <button
+              type="button"
+              onClick={handleStartSendQueue}
+              disabled={queueRunning || isScanning}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#25D366] hover:bg-[#1eb856] text-white text-xs font-bold rounded-xl shadow-sm transition disabled:opacity-50"
+            >
+              <Send className="w-4 h-4" />
+              <span>
+                {queueRunning && queue?.kind === 'send'
+                  ? `Enviando ${queue.processed}/${queue.total}...`
+                  : 'Fila: Enviar Todos para o WhatsApp'}
+              </span>
+            </button>
+
+            {/* Stop Queue Button */}
+            {queueRunning && (
+              <button
+                type="button"
+                onClick={handleCancelQueue}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-xs font-semibold rounded-xl transition shadow-sm"
+              >
+                <Square className="w-4 h-4" />
+                <span>Parar Fila</span>
+              </button>
+            )}
           </div>
         </section>
 
@@ -595,7 +717,10 @@ export default function Dashboard() {
                   onSearchVideo={handleSearchVideo}
                   onDownloadVideo={handleDownloadVideo}
                   onPipelineVideo={handlePipelineVideo}
+                  onSendToWhatsApp={handleSendToWhatsApp}
                   videoProcessing={videoSearchingId === product.id}
+                  whatsappSending={whatsappSendingId === product.id}
+                  actionsDisabled={queueRunning}
                 />
               ))}
             </div>
@@ -608,7 +733,7 @@ export default function Dashboard() {
         logs={logs}
         isOpen={isDrawerOpen}
         onToggle={() => setIsDrawerOpen(!isDrawerOpen)}
-        onClear={() => setLogs([])}
+        onClear={clearLogs}
         isScanning={isScanning}
       />
     </div>

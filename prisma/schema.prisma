@@ -8,18 +8,20 @@ generator client {
 }
 
 model Product {
-  id          String   @id
-  title       String
-  price       String
-  salesCount  Int
-  imageUrl    String
-  productUrl  String
-  searchTerm  String
-  status      String   @default("pending") // pending | published | discarded
-  tikTokUrl   String?
-  videoUrl    String?
-  videoPath   String?
-  videoStatus String   @default("none") // none | searched | downloaded | failed
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String    @id
+  title           String
+  price           String
+  salesCount      Int
+  imageUrl        String
+  productUrl      String
+  searchTerm      String
+  status          String    @default("pending") // pending | published | discarded
+  tikTokUrl       String?
+  videoUrl        String?
+  videoPath       String?
+  videoStatus     String    @default("none") // none | searched | downloaded | failed
+  whatsappStatus  String    @default("none") // none | sent | failed
+  sentAt          DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
