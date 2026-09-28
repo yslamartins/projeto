@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { downloadTikTokVideo } from '@/lib/tikdrop/download';
-import { sendProductVideoToWhatsApp } from '@/lib/whatsapp/send';
+import { runVideoDownload } from '@/lib/video/pipeline';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,49 +15,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) {
-      return NextResponse.json(
-        { success: false, error: 'Produto não encontrado' },
-        { status: 404 }
-      );
-    }
-
-    if (!product.tikTokUrl) {
-      return NextResponse.json(
-        { success: false, error: 'Produto não possui URL do TikTok (busque antes)' },
-        { status: 400 }
-      );
-    }
-
-    const result = await downloadTikTokVideo({
-      tikTokUrl: product.tikTokUrl,
-      productId: product.id,
-      headful: Boolean(headful),
-    });
+    const result = await runVideoDownload({ productId, headful });
 
     if (!result.success) {
-      await prisma.product
-        .update({ where: { id: productId }, data: { videoStatus: 'failed' } })
-        .catch(() => {});
-      return NextResponse.json({
-        success: false,
-        error: result.error || 'Falha ao baixar vídeo',
-      });
+      if (result.failure === 'not_found') {
+        return NextResponse.json({ success: false, error: result.error }, { status: 404 });
+      }
+      if (result.failure === 'missing_tikTok_url') {
+        return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({ success: false, error: result.error });
     }
 
-    const updated = await prisma.product.update({
-      where: { id: productId },
-      data: {
-        videoUrl: result.videoUrl,
-        videoPath: result.videoPath,
-        videoStatus: 'downloaded',
-      },
-    });
-
-    await sendProductVideoToWhatsApp(updated, updated.videoPath);
-
-    return NextResponse.json({ success: true, product: updated });
+    return NextResponse.json({ success: true, product: result.product });
   } catch (error: any) {
     console.error('Error downloading video:', error);
     return NextResponse.json(
