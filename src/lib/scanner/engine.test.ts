@@ -30,10 +30,18 @@ const eligibleCard = () => ({
 });
 
 const lowSalesCard = () => ({
+  rawHref: 'https://shopee.com.br/product/1001/2003',
+  rawTitle: 'Mouse com 1 venda',
+  rawPrice: 'R$ 6,90',
+  rawSalesText: '1 vendido',
+  rawImageUrl: '',
+});
+
+const noSalesCard = () => ({
   rawHref: 'https://shopee.com.br/product/1001/2002',
-  rawTitle: 'Mouse barato',
+  rawTitle: 'Mouse sem contador',
   rawPrice: 'R$ 9,90',
-  rawSalesText: '2 vendidos',
+  rawSalesText: '',
   rawImageUrl: '',
 });
 
@@ -79,7 +87,7 @@ describe('runShopeeScanner (driver via spawn)', () => {
     scannerEvents.setIsScanning(false);
   });
 
-  it('salva produtos elegíveis (>= 5 vendas e novos) no banco', async () => {
+  it('salva produtos elegíveis (>= 1 venda e novos) no banco', async () => {
 runCollectMock.mockImplementation(({ args }: any) =>
       args.includes('--term')
         ? Promise.resolve(searchOutcome({ cards: cards(eligibleCard) }))
@@ -105,18 +113,28 @@ runCollectMock.mockImplementation(({ args }: any) =>
     expect(prismaUpsertMock).toHaveBeenCalledTimes(10);
   });
 
+  it('aceita produto com 1 venda', async () => {
+    runCollectMock.mockImplementation(({ args }: any) =>
+      args.includes('--term') ? Promise.resolve(searchOutcome({ cards: cards(lowSalesCard, 1) })) : router({ args })
+    );
+
+    const result = await runShopeeScanner({ term: 'Mouse com 1 venda' });
+    expect(result.success).toBe(true);
+    expect(prismaUpsertMock).toHaveBeenCalledTimes(1);
+  });
+
   it('termo sem elegíveis: avisa e finaliza sem produtos', async () => {
     runCollectMock.mockImplementation(({ args }: any) =>
       args.includes('--term')
-? Promise.resolve(searchOutcome({ cards: cards(lowSalesCard, 4) }))
-          : router({ args })
+        ? Promise.resolve(searchOutcome({ cards: cards(noSalesCard, 4) }))
+        : router({ args })
     );
 
-    const result = await runShopeeScanner({ term: 'Mouse barato' });
+    const result = await runShopeeScanner({ term: 'Mouse sem contador' });
     expect(result.success).toBe(true);
     expect(result.product).toBeNull();
     expect(prismaUpsertMock).not.toHaveBeenCalled();
-    expect(captured.some((e) => e.message.includes('Nenhum produto novo com >= 5 vendas'))).toBe(true);
+    expect(captured.some((e) => e.message.includes('Nenhum produto novo com >= 1 venda'))).toBe(true);
   });
 
   it('termo com gate: reporta o erro e continua para o próximo termo', async () => {

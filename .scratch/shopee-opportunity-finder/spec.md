@@ -19,7 +19,7 @@ An automated local web application that monitors Shopee's trending searches, ana
 5. As a Shopee affiliate, I want the system to select only products with at least 5 sales so that I have proof of validation and buyer interest.
 6. As a Shopee affiliate, I want the system to skip products that already exist in my database so that I never waste time evaluating or publishing the same product twice.
 7. As a Shopee affiliate, I want the scanner to process each trending search term's candidates and only then cascade to the next term so that quantity of eligible products per term is prioritized.
-8. As a Shopee affiliate, I want the scan to save ALL eligible unworked products (sales >= 5) found among up to 30 products analyzed per trending term, up to a total of 10 products per term, so that I maximize the number of fresh opportunities captured from each term. After finishing a term (or reaching its 10-item limit), the scan continues to the next term.
+8. As a Shopee affiliate, I want the scan to save ALL eligible unworked products (sales >= 1) found among up to 30 products analyzed per trending term, up to a total of 10 products per term, so that I maximize the number of fresh opportunities captured from each term. After finishing a term (or reaching its 10-item limit), the scan continues to the next term.
 9. As a Shopee affiliate, I want the scan to consider at most 20 trending terms per run so that an execution does not become excessively long.
 10. As a Shopee affiliate, I want to view live scan progress logs in real time via Server-Sent Events so that I know exactly what the robot is doing and can spot any issues.
 11. As a Shopee affiliate, I want to open a visible browser window via a "Login Shopee" button so that I can authenticate or solve bot-check challenges once and save cookies persistently.
@@ -47,7 +47,7 @@ An automated local web application that monitors Shopee's trending searches, ana
   - Extracting Shopee's trending search sections via the driver.
   - Collecting search results sorted by newest (Shopee) and search cards (TikTok).
   - Extracting product cards: title, product URL/ID, price, sales count, image URL.
-  - Applying qualification rules (`salesCount >= 5 && !db.hasProduct(id)`).
+  - Applying qualification rules (`salesCount >= 1 && !db.hasProduct(id)`).
   - Collecting up to 10 eligible products per trending term (inspecting up to 30 products per term, saving all eligible candidates per term before moving on to the next term).
   - Emitting structured log events to a shared event stream.
 

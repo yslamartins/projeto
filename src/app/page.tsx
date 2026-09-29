@@ -6,6 +6,7 @@ import { Navbar } from '@/components/Navbar';
 import { ProductCard } from '@/components/ProductCard';
 import { TerminalDrawer } from '@/components/TerminalDrawer';
 import { useScannerLogs } from '@/hooks/useScannerLogs';
+import { MIN_SALES } from '@/lib/scanner/parser';
 import { Product, ProductStatus, QueueState } from '@/types/product';
 
 export default function Dashboard() {
@@ -461,7 +462,7 @@ export default function Dashboard() {
               Painel de Mineração de Vídeos
             </h2>
             <p className="text-xs sm:text-sm text-gray-500">
-              Monitore produtos recentes de buscas em alta com mais de 5 vendas para a Shopee Vídeo.
+              Monitore produtos recentes de buscas em alta com pelo menos {MIN_SALES} venda para a Shopee Vídeo.
             </p>
           </div>
 

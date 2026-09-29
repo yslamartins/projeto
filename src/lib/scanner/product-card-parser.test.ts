@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseProductCard } from './product-card-parser';
 
 describe('parseProductCard (TDD Seam)', () => {
-  it('should parse valid card with canonical URL and mark as eligible when sales >= 5 and not in database', () => {
+  it('should parse valid card with canonical URL and mark as eligible when sales >= 1 and not in database', () => {
     const rawCard = {
       rawHref: 'https://shopee.com.br/Projetor-Portatil-5G-Wifi-Android-i.12345678.98765432?sp_atk=abc123xyz',
       rawTitle: 'Projetor Portatil 5G Wifi Android Full HD',
@@ -25,17 +25,17 @@ describe('parseProductCard (TDD Seam)', () => {
     expect(result?.isEligible).toBe(true);
   });
 
-  it('should mark as not eligible when sales count is below 5', () => {
+  it('should mark as not eligible when the card has no sales counter', () => {
     const rawCard = {
       rawHref: 'https://shopee.com.br/Mouse-Sem-Fio-Optico-i.111222.333444',
       rawTitle: 'Mouse Sem Fio Optico 2.4Ghz',
       rawPrice: 'R$ 19,90',
-      rawSalesText: '3 vendidos',
+      rawSalesText: '',
     };
 
     const result = parseProductCard(rawCard, new Set());
     expect(result).not.toBeNull();
-    expect(result?.salesCount).toBe(3);
+    expect(result?.salesCount).toBe(0);
     expect(result?.isEligible).toBe(false);
   });
 
@@ -82,7 +82,7 @@ describe('parseProductCard (TDD Seam)', () => {
     expect(result?.isEligible).toBe(true);
   });
 
-  it('should parse /product/<shopId>/<itemId> cards and mark as eligible when sales >= 5', () => {
+  it('should parse /product/<shopId>/<itemId> cards and mark as eligible when sales >= 1', () => {
     const rawCard = {
       rawHref: 'https://shopee.com.br/product/300581799/22684694938?sp_atk=abc123',
       rawTitle: 'Caixa De Som Bluetooth Portatil',
@@ -118,7 +118,7 @@ describe('parseProductCard (TDD Seam)', () => {
     expect(result?.isEligible).toBe(false);
   });
 
-  it('should parse shopid/itemid query param cards as eligible when sales >= 5', () => {
+  it('should parse shopid/itemid query param cards as eligible when sales >= 1', () => {
     const rawCard = {
       rawHref: 'https://shopee.com.br/item?sp_atk=abc&shopid=401525579&itemid=22322311690',
       rawTitle: 'Sandalia Feminina Couro Legitimo',

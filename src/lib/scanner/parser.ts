@@ -3,6 +3,12 @@
  */
 
 /**
+ * Vendas mínimas para um produto entrar na varredura. Fonte única da verdade:
+ * a regra de elegibilidade e os textos que a descrevem na tela e nos logs.
+ */
+export const MIN_SALES = 1;
+
+/**
  * Converte strings de vendas da Shopee para número inteiro.
  * Exemplos:
  * "5 vendidos" -> 5
@@ -133,7 +139,7 @@ export function formatPrice(priceText: string | null | undefined): string {
 
 /**
  * Regra de negócio de elegibilidade:
- * 1. Mínimo de 5 vendas
+ * 1. Mínimo de MIN_SALES vendas
  * 2. Produto ainda não existente no banco
  */
 export function isProductEligible(
@@ -141,7 +147,7 @@ export function isProductEligible(
   productId: string,
   existingProductIds: Set<string>
 ): boolean {
-  if (salesCount < 5) return false;
+  if (salesCount < MIN_SALES) return false;
   if (existingProductIds.has(productId)) return false;
   return true;
 }

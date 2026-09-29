@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { scannerEvents } from './events';
 import { parseProductCard, RawCardData } from './product-card-parser';
+import { MIN_SALES } from './parser';
 import { runCollect } from './spawn-driver';
 
 const MAX_TERMS_PER_SCAN = 20;
@@ -199,7 +200,7 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
         const raw = rawProducts[j];
         const candidate = parseProductCard(raw, existingIds);
 
-        // Se for elegível (>= 5 vendas e ainda não cadastrado)
+        // Se for elegível (>= MIN_SALES vendas e ainda não cadastrado)
         if (candidate && candidate.isEligible) {
           scannerEvents.emit(
             'success',
@@ -256,7 +257,7 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
       } else {
         scannerEvents.emit(
           'warn',
-          `Nenhum produto novo com >= 5 vendas nos primeiros ${rawProducts.length} produtos de "${term}".`
+          `Nenhum produto novo com >= ${MIN_SALES} venda(s) nos primeiros ${rawProducts.length} produtos de "${term}".`
         );
       }
     }
@@ -271,7 +272,7 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
 
     scannerEvents.emit(
       'warn',
-      `Varredura finalizada. Nenhum produto novo com >= 5 vendas foi encontrado nos ${trendingTerms.length} termos pesquisados.`
+      `Varredura finalizada. Nenhum produto novo com >= ${MIN_SALES} venda(s) foi encontrado nos ${trendingTerms.length} termos pesquisados.`
     );
     return { success: true, product: null };
   } catch (error: any) {

@@ -6,6 +6,7 @@ import {
   isShopeeProductUrl,
   isProductEligible,
   formatPrice,
+  MIN_SALES,
 } from './parser';
 
 describe('Shopee Parser Unit Tests', () => {
@@ -112,17 +113,17 @@ describe('Shopee Parser Unit Tests', () => {
   describe('isProductEligible', () => {
     const existingIds = new Set(['111.222', '333.444']);
 
-    it('should reject products with less than 5 sales', () => {
+    it('should reject products with no sales', () => {
       expect(isProductEligible(0, '999.000', existingIds)).toBe(false);
-      expect(isProductEligible(4, '999.000', existingIds)).toBe(false);
     });
 
     it('should reject products that already exist in database regardless of sales', () => {
       expect(isProductEligible(50, '111.222', existingIds)).toBe(false);
     });
 
-    it('should accept products with >= 5 sales that are not in database', () => {
-      expect(isProductEligible(5, '999.000', existingIds)).toBe(true);
+    it(`should accept products with >= ${MIN_SALES} sale(s) that are not in database`, () => {
+      expect(isProductEligible(MIN_SALES, '999.000', existingIds)).toBe(true);
+      expect(isProductEligible(4, '999.000', existingIds)).toBe(true);
       expect(isProductEligible(120, '888.777', existingIds)).toBe(true);
     });
   });
