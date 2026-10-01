@@ -1,8 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import { scannerEvents } from './events';
 import { killActiveCollectSession } from './spawn-driver';
+import { sweepStaleSessionChrome } from '../whatsapp/sweep';
 
-const PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
+export const SHOPEE_PROFILE_DIR = path.resolve(process.cwd(), '.shopee_profile');
+const PROFILE_DIR = SHOPEE_PROFILE_DIR;
 const BACKUP_DIR = path.resolve(process.cwd(), 'backups');
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,6 +26,14 @@ export async function resetShopeeProfile(): Promise<{
     // Garante que nenhuma sessão do driver Python esteja segurando lock nos
     // arquivos do perfil (a janela de login do Scrapling usa o .shopee_profile).
     killActiveCollectSession();
+    // O `killActiveCollectSession` manda SIGTERM só pro `python.exe`: no Windows
+    // isso NÃO derruba o Chrome que ele lançou, e o órfão fica segurando o
+    // user-data-dir. Sem esta limpeza o rename do perfil falha e a sessão nova
+    // sobe num perfil travado.
+    const swept = await sweepStaleSessionChrome(PROFILE_DIR);
+    if (swept > 0) {
+      scannerEvents.emit('warn', `Shopee: encerrei ${swept} Chrome(s) preso(s) no perfil antes do reset.`);
+    }
     // O subprocesso morre de forma assíncrona; dá um tempo antes de mover.
     await sleep(2000);
 

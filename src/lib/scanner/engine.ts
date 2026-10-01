@@ -3,6 +3,8 @@ import { scannerEvents } from './events';
 import { parseProductCard, RawCardData } from './product-card-parser';
 import { MIN_SALES } from './parser';
 import { runCollect } from './spawn-driver';
+import { sweepStaleSessionChrome } from '../whatsapp/sweep';
+import { SHOPEE_PROFILE_DIR } from './profile';
 
 const MAX_TERMS_PER_SCAN = 20;
 const MAX_PRODUCTS_PER_TERM = 30;
@@ -60,10 +62,38 @@ function driverArgs(extra: string[], headful: boolean): string[] {
 }
 
 /**
+ * O `.shopee_profile` aceita um navegador por vez. Se sobrar Chrome apontando pra
+ * ele — a janela do "Login Shopee" que a pessoa esqueceu aberta, ou um órfão de
+ * uma sessão anterior — o `launch_persistent_context` do driver morre na hora com
+ * `Target page, context or browser has been closed` / `exitCode=21`, e a varredura
+ * cai no primeiro termo.
+ *
+ * Isso não é hipótese: o `taskkill` não existe neste ambiente, então o Playwright
+ * não consegue derrubar o Chrome ao fechar (ele chama `taskkill` e falha em
+ * silêncio), então os órfãos se acumulam. Aqui limpamos antes de subir o driver.
+ */
+async function ensureShopeeProfileIsFree(): Promise<void> {
+  try {
+    const swept = await sweepStaleSessionChrome(SHOPEE_PROFILE_DIR);
+    if (swept > 0) {
+      scannerEvents.emit(
+        'warn',
+        `Shopee: encerrei ${swept} Chrome(s) que ainda seguravam o perfil. ` +
+          'Se a janela do Login Shopee estiver aberta, ela foi fechada — refaça o login depois da varredura.'
+      );
+    }
+  } catch {
+    // Sem PowerShell: segue e deixa o driver relatar o erro real.
+  }
+}
+
+/**
  * Obtém os termos de "Buscas em alta" via driver Python; em falha, cai para a
  * lista fixa REAL_SHOPEE_TRENDING_TERMS (comportamento original do engine).
  */
 async function collectTrendingTerms(headful: boolean): Promise<string[]> {
+  await ensureShopeeProfileIsFree();
+
   const outcome = await runCollect<TrendingTermsOutcome>({
     args: driverArgs(['shopee', 'terms'], headful),
   });
@@ -111,6 +141,10 @@ export async function runShopeeScanner(options: ScannerOptions = {}): Promise<{
 
   scannerEvents.setIsScanning(true);
   scannerEvents.emit('step', 'Iniciando robô de varredura da Shopee...');
+
+  // Limpa o perfil uma vez por execução: `runShopeeScanner` já é serializado por
+  // `getIsScanning()`, então os N termos reaproveitam o perfil já liberado.
+  await ensureShopeeProfileIsFree();
 
   try {
     // 1. Carregar produtos já existentes para evitar duplicatas

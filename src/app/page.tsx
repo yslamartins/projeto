@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [headfulMode, setHeadfulMode] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isLaunchingSession, setIsLaunchingSession] = useState(false);
+  const [isShopeeLoggedIn, setIsShopeeLoggedIn] = useState<boolean | null>(null);
   const [isLaunchingTikTok, setIsLaunchingTikTok] = useState(false);
   const [isResettingProfile, setIsResettingProfile] = useState(false);
   const [videoSearchingId, setVideoSearchingId] = useState<string | null>(null);
@@ -74,6 +75,16 @@ export default function Dashboard() {
     return () => clearInterval(interval);
     // `queueLabel` acompanha `queue.kind`, que não muda durante a execução.
   }, [queueRunning, queueLabel]);
+
+  // Selo de autenticação ao lado do botão "Login Shopee". Faz uma leitura no mount
+  // e depois a cada 30s — só para mostrar o estado; quem fecha o login é a pessoa,
+  // no Chrome. Enquanto a janela está aberta a leitura volta `null` (arquivo de
+  // cookies travado), que é exatamente o que o selo precisa distinguir de "sem login".
+  useEffect(() => {
+    void refreshSessionStatus();
+    const interval = setInterval(() => void refreshSessionStatus(), 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const TRENDING_CHIPS = [
     'Projetor',
@@ -156,17 +167,31 @@ export default function Dashboard() {
     }
   };
 
+  /**
+   * Estado de login do perfil. `null` não é "deslogado": é "não deu para ler agora",
+   * o que acontece enquanto o Chrome está aberto (ele trava o arquivo de cookies).
+   */
+  const refreshSessionStatus = async () => {
+    try {
+      const res = await fetch('/api/scanner/session');
+      const data = await res.json();
+      setIsShopeeLoggedIn(typeof data.authenticated === 'boolean' ? data.authenticated : null);
+    } catch {
+      setIsShopeeLoggedIn(null);
+    }
+  };
+
   const handleLaunchSession = async () => {
     if (isLaunchingSession) return;
     setIsLaunchingSession(true);
     setIsDrawerOpen(true);
-    addLog('step', 'Abrindo navegador persistente para autenticação na Shopee...');
+    addLog('step', 'Abrindo o Chrome no perfil persistente da Shopee...');
 
     try {
       const res = await fetch('/api/scanner/session', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        addLog('success', 'Navegador aberto! Realize o login ou verificações se necessário.');
+        addLog('success', 'Chrome aberto! Faça o login na janela e feche-a quando terminar.');
       } else {
         addLog('error', `Falha ao abrir navegador: ${data.error}`);
       }
@@ -174,6 +199,7 @@ export default function Dashboard() {
       addLog('error', `Erro ao comunicar com o servidor: ${err.message}`);
     } finally {
       setIsLaunchingSession(false);
+      void refreshSessionStatus();
     }
   };
 
@@ -484,10 +510,18 @@ export default function Dashboard() {
               type="button"
               onClick={handleLaunchSession}
               disabled={isLaunchingSession || isScanning}
+              title={
+                isShopeeLoggedIn === true
+                  ? 'Perfil autenticado (cookie SPC_ST gravado). Clique para abrir o Chrome mesmo assim.'
+                  : isShopeeLoggedIn === null
+                    ? 'Não foi possível ler o estado agora (o Chrome aberto trava o arquivo de cookies).'
+                    : 'Perfil sem login. A varredura funciona, mas alguns termos só aparecem para contas autenticadas.'
+              }
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition shadow-sm disabled:opacity-50"
             >
               <LogIn className="w-4 h-4 text-gray-500" />
               <span>{isLaunchingSession ? 'Abrindo...' : 'Login Shopee'}</span>
+              <SessionBadge state={isShopeeLoggedIn} />
             </button>
 
             {/* Login TikTok Button */}
@@ -738,5 +772,34 @@ export default function Dashboard() {
         isScanning={isScanning}
       />
     </div>
+  );
+}
+
+/**
+ * Selo de três estados ao lado do botão "Login Shopee".
+ *
+ * O estado `null` (não deu para ler) é separado de propósito: com o Chrome aberto o
+ * arquivo de cookies fica travado, e mostrar "sem login" ali seria mentira — foi
+ * exatamente a confusão que o app vinha causando ("abriu mas não entrei").
+ */
+function SessionBadge({ state }: { state: boolean | null }) {
+  if (state === true) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-bold text-green-700">
+        Autenticado
+      </span>
+    );
+  }
+  if (state === false) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+        Sem login
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+      ...
+    </span>
   );
 }

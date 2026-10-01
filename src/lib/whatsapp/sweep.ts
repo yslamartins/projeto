@@ -1,11 +1,11 @@
-import { spawn } from 'child_process';
-import { join } from 'path';
-import { existsSync, rmSync } from 'fs';
+import {
+  killProcessTree,
+  listWindowsProcesses,
+  removeOrphanLockArtifacts,
+  sweepProcesses,
+} from '../process/sweep';
 
 const PROFILE_FLAG = '--user-data-dir=';
-const SWEEP_CONFIRM_TIMEOUT_MS = 4000;
-const SWEEP_CONFIRM_INTERVAL_MS = 150;
-const LOCK_ARTIFACTS = ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
 
 function normalizeKey(dir: string): string {
   return dir.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -30,62 +30,27 @@ function isChromeForProfile(commandLine: string, profileKey: string): boolean {
   return value !== null && normalizeKey(value) === profileKey;
 }
 
-function runPowerShell(script: string): Promise<string> {
-  return new Promise((resolve) => {
-    let stdout = '';
-    const child = spawn(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
-    );
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk;
-    });
-    child.on('error', () => resolve(''));
-    child.on('close', () => resolve(stdout));
-  });
-}
-
-async function listChromePidsForProfile(profileDir: string): Promise<number[]> {
-  const script =
-    "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | " +
-    'ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }';
-  const stdout = await runPowerShell(script);
-  const profileKey = normalizeKey(profileDir);
-  const pids: number[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    const tab = line.indexOf('\t');
-    if (tab === -1) continue;
-    const pid = Number(line.slice(0, tab));
-    if (!Number.isInteger(pid) || pid <= 0) continue;
-    if (isChromeForProfile(line.slice(tab + 1), profileKey)) pids.push(pid);
-  }
-  return pids;
-}
-
-// Diagnostico real (diag-taskkill2.txt): `taskkill /F /T` FALHA silenciosamente
-// neste ambiente — nao mata, saida vazia, $LASTEXITCODE vazio, processos seguem
-// vivos. So `Stop-Process -Force` derruba a arvore e libera o SingletonLock. O
-// sweep precisa derrubar DE VERDADE, senao o retry sobe e toma "already running".
-async function killChromeTree(pid: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const ps = spawn(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', `Stop-Process -Id ${pid} -Force`],
-      { windowsHide: true, stdio: 'ignore' }
-    );
-    ps.on('error', () => resolve());
-    ps.on('close', () => resolve());
-  });
-}
-
 export type ChromePidLister = (profileDir: string) => Promise<number[]>;
 export type ChromePidKiller = (pid: number) => Promise<void>;
 
+async function defaultLister(profileDir: string): Promise<number[]> {
+  const processes = await listWindowsProcesses('chrome.exe');
+  const profileKey = normalizeKey(profileDir);
+  return processes.filter((p) => isChromeForProfile(p.commandLine, profileKey)).map((p) => p.pid);
+}
+
+/**
+ * Derruba o Chrome que ficou preso no perfil de sessão do WhatsApp.
+ *
+ * A sessão salva é retomada reabrindo o MESMO perfil do Chrome
+ * (`--user-data-dir=session`). Se uma run anterior deixou um Chrome vivo segurando
+ * esse perfil — crash, Ctrl+C no processo errado, teardown que NÃO derrubou a
+ * árvore — o Puppeteer recusa com "already running" e o retry quebraria pra sempre.
+ */
 export async function sweepStaleSessionChrome(
   profileDir: string,
-  lister: ChromePidLister = listChromePidsForProfile,
-  killer: ChromePidKiller = killChromeTree
+  lister: ChromePidLister = defaultLister,
+  killer: ChromePidKiller = killProcessTree
 ): Promise<number> {
   let pids: number[];
   try {
@@ -93,37 +58,24 @@ export async function sweepStaleSessionChrome(
   } catch {
     return 0;
   }
+  if (pids.length === 0) return 0;
+
   await Promise.all(pids.map((pid) => killer(pid).catch(() => {})));
-  // O Stop-Process roda assincrono: o processo pode demorar alguns ms pra de
-  // fato morrer e liberar o SingletonLock. Se o retry subir o Chrome agora, vai
-  // receber 'already running' de novo. Aguarda a liberacao REAL (re-lister ate
-  // restar 0), com timeout p/ nunca pendurar a sessao se a morte demorar.
-  if (pids.length > 0) {
-    const deadline = Date.now() + SWEEP_CONFIRM_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      try {
-        const restantes = await lister(profileDir);
-        if (restantes.length === 0) break;
-      } catch { break; }
-      await new Promise((r) => setTimeout(r, SWEEP_CONFIRM_INTERVAL_MS));
+
+  const deadline = Date.now() + 4000;
+  while (Date.now() < deadline) {
+    try {
+      if ((await lister(profileDir)).length === 0) break;
+    } catch {
+      break;
     }
+    await new Promise((r) => setTimeout(r, 150));
   }
 
-  // Importante: o Puppeteer em Windows (BrowserLauncher.js:175) dispara o erro
-  // "already running" se o ARQUIVO `lockfile` EXISTIR no userDataDir — nao o
-  // SingletonLock, e nao exige Chrome vivo. Stop-Process -Force mata o processo
-  // mas pode deixar o `lockfile` (e os Singleton*) ORFAOS em disco; se nao
-  // removermos, o retry re-sobe e recebe o mesmo erro de novo.
-  // Sao so artefatos de lock (o Chrome recria no launch), nunca a sessao.
-  const restantes = pids.length > 0 ? await lister(profileDir) : [];
-  const livre = restantes.length === 0;
-  if (livre) {
-    for (const name of LOCK_ARTIFACTS) {
-      try {
-        const p = join(profileDir, name);
-        if (existsSync(p)) rmSync(p, { force: true });
-      } catch { /* arquivo em uso por um processo que ainda morre -> visto no proximo retry */ }
-    }
+  if ((await lister(profileDir).catch(() => pids)).length === 0) {
+    removeOrphanLockArtifacts(profileDir);
   }
   return pids.length;
 }
+
+export { sweepProcesses };

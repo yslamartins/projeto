@@ -18,14 +18,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote as _urlencode
 
+from session_state import (
+    SHOPEE_AUTH_COOKIE,
+    SHOPEE_LOGIN_URL,
+    chrome_pids_for_profile,
+    kill_profile_chrome,
+    login_args,
+    read_auth_state,
+    resolve_chrome_path,
+)
 from shopee_parser import (
     BASE_URL,
     MAX_TERMS_PER_SCAN,
@@ -190,6 +201,28 @@ def _to_str(data: Any) -> str:
     if isinstance(data, bytes):
         return data.decode("utf-8", errors="replace")
     return str(data) if data is not None else ""
+
+
+def _describe_open_failure(site: str, exc: Exception) -> str:
+    """Traduz a exceção de abertura do Chrome em algo que o usuário consiga agir.
+
+    O Playwright despeja o log inteiro do launch (centenas de linhas) no
+    TargetClosedError; quando o perfil já está em uso isso esconde a causa real.
+    """
+    raw = str(exc)
+    profile = PROFILES[site]
+    from patchright.sync_api import TargetClosedError
+
+    if isinstance(exc, TargetClosedError) or "Target page, context or browser has been closed" in raw:
+        held = chrome_pids_for_profile(profile)
+        if held:
+            return (
+                f"O perfil {profile.name} já está em uso por outra sessão do navegador "
+                f"(processo chrome.exe {held[0]} em diante). Feche a janela do Login "
+                "aberta anteriormente e clique em Login novamente."
+            )
+        return "O Chrome fechou imediatamente ao abrir. Tente novamente em alguns instantes."
+    return f"Falha ao abrir o navegador: {raw[:300]}"
 
 
 # --- Ações --------------------------------------------------------------------
@@ -453,29 +486,153 @@ def action_search(term: str, headful: bool, save_fixture: bool = False) -> dict[
 
 
 def action_session(site: str) -> dict[str, Any]:
-    """Abre o navegador visível e aguarda a ação humana; fecha ao fechar a aba.
+    """Abre a sessão de login e aguarda a ação humana.
 
-    Espelha openTikTokSession / sessão de login da Shopee: login manual 1x,
-    cookies persistidos no perfil e reutilizados pelas varreduras headless.
+    Shopee e TikTok nao compartilham mais a implementacao: o login da Shopee roda
+    em Chrome puro (`action_shopee_login`) porque o launch automatizado do Scrapling
+    travava o modal de telefone em loading infinito; o TikTok continua no Scrapling
+    (`action_session_scrapling`) por causa da sessao de busca dos videos.
+    """
+    if site == "shopee":
+        return action_shopee_login()
+    return action_session_scrapling(site)
+
+
+# Marcadores de maquina no log: o `session.ts` casa neles em vez de fazer regex na
+# prosa PT-BR, que quebrava a cada ajuste de wording.
+SESSION_OPENED = "[session] browser-aberto"
+SESSION_OPEN_FAILED = "[session] falha-abrir"
+SESSION_CLOSED = "[session] sessao-encerrada"
+
+# Tempo para o Chrome criar a janela antes de conferirmos que ele realmente subiu.
+# Abaixo disso ainda nao ha processo, acima disso o usuario ja esta podendo clicar.
+_BROWSER_CONFIRM_DELAY_S = 2.5
+_BROWSER_CONFIRM_ATTEMPTS = 8
+
+
+def action_shopee_login() -> dict[str, Any]:
+    """Login HITL em Chrome puro sobre o `.shopee_profile` persistente.
+
+    Nao ha automacao aqui de proposito: o launch do patchright (Scrapling) foi o que
+    travou o modal "logar com numero de telefone" em loading infinito. Abrir o Chrome
+    de verdade no mesmo perfil tira a flag de automacao da equacao e faz o login se
+    comportar como o de sempre. As varreduras continuam usando o Scrapling — elas nao
+    dependem do login para passar do anti-bot (o que resolve o gate e o launch
+    `real_chrome=True` + `google_search=False`, achado do ticket 01).
+    """
+    profile = PROFILES["shopee"]
+    chrome = resolve_chrome_path()
+    if not chrome:
+        override = (os.environ.get("SHOPEE_CHROME_PATH") or "").strip()
+        if override:
+            reason = (
+                f"SHOPEE_CHROME_PATH aponta para um caminho que não existe: {override}. "
+                "Corrija a variável ou apague-a para o driver achar o Chrome instalado."
+            )
+        else:
+            reason = (
+                "Não encontrei o Google Chrome neste computador. Instale o Chrome ou "
+                "defina SHOPEE_CHROME_PATH com o caminho completo do chrome.exe."
+            )
+        emit_log("error", f"{SESSION_OPEN_FAILED}: {reason}")
+        return {"ok": False, "site": "shopee", "error": reason}
+
+    profile.mkdir(parents=True, exist_ok=True)
+
+    held = kill_profile_chrome(profile)
+    if held:
+        emit_log(
+            "warn",
+            f"[session] Encerrei {len(held)} Chrome(s) que ainda seguravam o perfil "
+            f"{profile.name} (processo {held[0]} em diante).",
+        )
+
+    emit_log(
+        "step",
+        f"[session] Abrindo o Chrome no perfil persistente {profile.name} em {SHOPEE_LOGIN_URL}...",
+    )
+
+    try:
+        proc = subprocess.Popen(
+            [chrome, *login_args(profile, SHOPEE_LOGIN_URL)],
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+    except OSError as exc:
+        reason = f"Não consegui abrir o Chrome ({exc})."
+        emit_log("error", f"{SESSION_OPEN_FAILED}: {reason}")
+        return {"ok": False, "site": "shopee", "error": reason}
+
+    if not _wait_for_browser_window(profile, proc):
+        reason = (
+            "O Chrome não chegou a abrir uma janela no perfil "
+            f"{profile.name}. Feche qualquer janela do Shopee Login ainda aberta "
+            "e tente de novo."
+        )
+        emit_log("error", f"{SESSION_OPEN_FAILED}: {reason}")
+        return {"ok": False, "site": "shopee", "error": reason}
+
+    emit_log(
+        "success",
+        f"{SESSION_OPENED}: Chrome aberto(a) no perfil {profile.name}. Faça o login na "
+        "janela (telefone ou QR code pelo app Shopee) e feche a janela quando terminar.",
+    )
+
+    proc.wait()
+
+    authenticated = read_auth_state(profile)
+    if authenticated:
+        message = (
+            f"Login confirmado — o cookie {SHOPEE_AUTH_COOKIE} foi gravado no perfil. "
+            "As próximas varreduras reaproveitam a sessão."
+        )
+        emit_log("success", f"{SESSION_CLOSED}: {message}")
+        return {"ok": True, "site": "shopee", "authenticated": True, "message": message}
+
+    message = (
+        "A janela foi fechada sem login. Sem o cookie "
+        f"{SHOPEE_AUTH_COOKIE} no perfil, a varredura continua funcionando, mas alguns "
+        "termos só aparecem para contas autenticadas. Se a Shopee mostrou verificação "
+        "de segurança, clique em Login novamente e resolva o desafio."
+    )
+    emit_log("warn", f"{SESSION_CLOSED}: {message}")
+    return {"ok": True, "site": "shopee", "authenticated": False, "message": message}
+
+
+def _wait_for_browser_window(profile: Path, proc: Any) -> bool:
+    """True quando existe um chrome.exe vivo apontando pro perfil.
+
+    Espere pelo processo do launcher nao basta: o Chrome delega para um processo
+    navegador separado, e um launcher vivo sem processo navegador e exatamente o
+    caso do perfil travado que produzia o "abriu e morreu" sem aviso.
+    """
+    for _ in range(_BROWSER_CONFIRM_ATTEMPTS):
+        time.sleep(_BROWSER_CONFIRM_DELAY_S)
+        if proc.poll() is not None:
+            return False
+        if chrome_pids_for_profile(profile):
+            return True
+    return False
+
+
+def action_session_scrapling(site: str) -> dict[str, Any]:
+    """Abre o navegador visível via Scrapling e aguarda a ação humana (TikTok).
+
+    Mantido como estava: a sessao do TikTok alimenta a busca de videos e precisa do
+    perfil do Scrapling. `hold_open` nao navega de proposito — re-navegar reiniciava
+    o skeleton da pagina e parecia travamento.
     """
     emit_log("step", f"[session] Abrindo navegador visível com o perfil persistente de {site}...")
 
     def hold_open(page: Any) -> None:
-        try:
-            page.goto(HOME_URLS[site], timeout=45000)
-        except Exception:  # noqa: BLE001 — navegação inicial pode falhar em tela de login
-            pass
-        try:
-            while not page.is_closed():
-                time.sleep(1)
-        except Exception:  # noqa: BLE001
-            pass
+        while not page.is_closed():
+            time.sleep(1)
 
     try:
         with open_session(site, headful=True, retries=1) as session:
             emit_log(
                 "success",
-                f"{site.capitalize()} aberto(a)! Faça o login ou resolva qualquer verificação. "
+                f"{SESSION_OPENED}: {site.capitalize()} aberto(a) no navegador visível. "
+                "Faça o login ou resolva qualquer verificação. "
                 "Feche a aba/janela para encerrar a sessão.",
             )
             try:
@@ -489,11 +646,28 @@ def action_session(site: str) -> dict[str, Any]:
                 )
             except Exception:  # noqa: BLE001 — a página fecha junto com a ação humana
                 pass
-            emit_log("info", f"[session] Sessão de {site} encerrada; cookies salvos no perfil.")
+            emit_log("info", f"{SESSION_CLOSED}: sessão de {site} encerrada; cookies salvos no perfil.")
         return {"ok": True, "site": site, "message": "Sessão encerrada e perfil salvo."}
     except Exception as exc:  # noqa: BLE001
-        emit_log("error", f"[session] Falha ao abrir {site}: {exc}")
-        return {"ok": False, "site": site, "error": str(exc)}
+        reason = _describe_open_failure(site, exc)
+        emit_log("error", f"{SESSION_OPEN_FAILED}: {reason}")
+        return {"ok": False, "site": site, "error": reason}
+
+
+def action_session_status(site: str) -> dict[str, Any]:
+    """Estado de autenticação do perfil, lido do cookie `SPC_ST`.
+
+    Só responde com verdade quando dá: com o Chrome aberto o arquivo de cookies está
+    travado e o estado é `unknown`, não `false`.
+    """
+    profile = PROFILES[site]
+    authenticated = read_auth_state(profile)
+    return {
+        "ok": True,
+        "site": site,
+        "authenticated": authenticated,
+        "known": authenticated is not None,
+    }
 
 
 def action_tiktok_search(term: str, headful: bool, save_fixture: bool = False) -> dict[str, Any]:
@@ -559,8 +733,11 @@ def main() -> int:
     parser.add_argument("site", choices=sorted(PROFILES), help="Site alvo")
     parser.add_argument(
         "action",
-        choices=["ping", "terms", "search", "session"],
-        help="Ação a executar (terms/search: Shopee; session: ambos)",
+        choices=["ping", "terms", "search", "session", "session-status"],
+        help=(
+            "Ação a executar (terms/search: Shopee; session: login HITL; "
+            "session-status: estado de autenticação do perfil)"
+        ),
     )
     parser.add_argument("--term", help="Termo de busca")
     parser.add_argument(
@@ -586,6 +763,8 @@ def main() -> int:
                 emit_result(False, error=f"Site desconhecido: {args.site}")
                 return 2
             data = action_session(args.site)
+        elif args.action == "session-status":
+            data = action_session_status(args.site)
         elif args.site == "shopee" and args.action == "terms":
             data = action_terms(args.headful)
         elif args.site == "shopee" and args.action == "search":
